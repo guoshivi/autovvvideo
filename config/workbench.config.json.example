@@ -1,0 +1,20 @@
+{
+  "host": "127.0.0.1",
+  "port": 8765,
+  "data_root": "./data",
+  "nas_roots": ["./materials"],
+  "output_root": "./output",
+  "project_src": ".",
+  "model_dir": "./models/embedding",
+  "tts_model": "./models/tts",
+  "tools_dir": "./tools",
+  "font_path": "./tools/font.ttf",
+  "gpu_lock_path": "./data/gpu.lock",
+  "ffmpeg": "./tools/ffmpeg.exe",
+  "ffprobe": "./tools/ffprobe.exe",
+  "fdk_encoder": "./tools/fdkaac.exe",
+  "tts_python": ".runtime/tts/Scripts/python.exe",
+  "embedding_python": ".runtime/embedding/Scripts/python.exe",
+  "ai_base_url": "https://api.deepseek.com",
+  "ai_model": "deepseek-chat"
+}

@@ -1,0 +1,112 @@
+{
+  "schema_version": 1,
+  "status": "VERIFIED_BY_PARENT",
+  "notes": "Sources, revisions and published hashes verified. This does not claim fresh-Windows install or RTX3080Ti real output tested. No secret/media/model binary is included.",
+  "assets": {
+    "uv": {
+      "url": "https://github.com/astral-sh/uv/releases/download/0.13.0/uv-x86_64-pc-windows-msvc.zip",
+      "sha256": "088962f9e7b7bd9ea740c04c650b2a21c8928c345bd99ac24350dc924dba656c",
+      "version": "0.13.0"
+    },
+    "ffmpeg_shared_gpl": {
+      "url": "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-09-30-13-08/ffmpeg-n8.1.3-9-g29e619e767-win64-gpl-shared-8.1.zip",
+      "sha256": "dfe81c3aa0a546ee81980b1b824486dd0fe0a1d452f00cb55135379a74be7bcf",
+      "version": "autobuild-2026-09-30-13-08",
+      "license_notice": "BtbN GPLv3 shared build; DLLs required by TorchCodec; no binaries redistributed here."
+    },
+    "fdkaac": {
+      "url": "https://www.rarewares.org/files/aac/fdkaac-1.0.5-x64.zip",
+      "sha256": "2717cf55c641326cd7551f337ca5b2220764ce21aea609b24dd3d52755f32d4a",
+      "version": "1.0.5",
+      "executable_sha256": "f8831e22a8e42e71f24353397d6ed3fd9311dc975d66a696832be9463eacfb22",
+      "license_notice": "RareWares third-party unsigned build; fdkaac Zlib/BSD/MIT; FDK-AAC NOTICE and no AAC patent license. Download on target, do not redistribute binary in repo."
+    },
+    "models": {
+      "embedding": {
+        "source": "huggingface_snapshot",
+        "repo_id": "google/embeddinggemma-2",
+        "revision": "914f7f89142e33e77833254d9c9b90c3cef7303b",
+        "files_sha256": {
+          ".gitattributes": "bcdccfaa66bc1240c7192dbd374cfb39b695bb1d8ff6b7ce0113aa5e9ac21a44",
+          "1_Pooling/config.json": "8759bdf7c77efc7df7723f64856a593c8943b71ee38baf2a88771fbaf78438f9",
+          "2_Normalize/config.json": "cdb09dfca347a56aa2d691744e38d5ad3c7cbc2834e7181272b9a15328b82524",
+          "README.md": "b677a0ee2818c36f091b65fd3d9b4baea9f04d53b02b49cae916c74bf9682037",
+          "chat_template.jinja": "4b852efc0b9960283e735363331e6f325b33bc74bdbaa076f595bc4e9b94d85e",
+          "config.json": "b8f1e9931b57fbc054acdb445c41765d55b0074c58d145fa82839941ad1b5bb3",
+          "config_sentence_transformers.json": "031e56a498d33c349ab489a21885bcfe25b4fcba841149dc99e1e90d4a7c28f5",
+          "modules.json": "3d02572a0455b832de67fb8e63a54981bc7e8b46e337c95e917bd8122a533bfd",
+          "preprocessor_config.json": "ea2ae257e901064abdd98dceb19f2b0da06af600bed15e0f99f5c85c37ee9d78",
+          "processor_config.json": "168f6a08522f3ce5dea596d94d003af2fd691742d4f41fe1f9d8cce76bfbf69c",
+          "sentence_bert_config.json": "b1bcd9f2dce3ae863b359e87d0710b5dbc3314a59ecb4e2f97c7778fc8e4b228",
+          "tokenizer_config.json": "17bd5d6e9364ca49a534e1502076593317c298d4a663623091ed45388f004874",
+          "model.safetensors": "197a32965d4b1105faf060417baa899e193fb73cd401f42ec9295234d5553d79",
+          "tokenizer.json": "4d777ef5bdc1aa36227abdfb77c3e49e7b9c892d16e1b6bda41c393504828be4",
+          "tokenizer.model": "e594c8a90eb08d8bda498ff4747977dc827ae0c3c56b5c0d41a605a22d02ef03"
+        },
+        "files_bytes": {
+          ".gitattributes": 1301,
+          "1_Pooling/config.json": 90,
+          "2_Normalize/config.json": 97,
+          "README.md": 21730,
+          "chat_template.jinja": 1016,
+          "config.json": 4455,
+          "config_sentence_transformers.json": 1565,
+          "model.safetensors": 1488915288,
+          "modules.json": 413,
+          "preprocessor_config.json": 511,
+          "processor_config.json": 1788,
+          "sentence_bert_config.json": 747,
+          "tokenizer.json": 32170510,
+          "tokenizer.model": 4689013,
+          "tokenizer_config.json": 1599
+        },
+        "license": "Apache-2.0",
+        "verification": "Non-LFS official Git-blob plus length verified by parent; LFS SHA from official immutable revision API. All files must be SHA verified after target download."
+      },
+      "tts": {
+        "source": "huggingface_snapshot",
+        "repo_id": "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice",
+        "revision": "85e237c12c027371202489a0ec509ded67b5e4b5",
+        "files_sha256": {
+          ".gitattributes": "11ad7efa24975ee4b0c3c3a38ed18737f0658a5f75a0a96787b576a78a023361",
+          "README.md": "1e3adeecc7a72d6756fdb77c2847f8e994195e105b51206a7a5c049b0dfa48a8",
+          "config.json": "81aca2b6fac304944d8acf345272d8a9a727d5fc2e2e66b222ab4729340c7455",
+          "generation_config.json": "f1b90b4513f3b34c62851049e2492d7b4c5940daf1276f89c82b8ef04127f3aa",
+          "merges.txt": "599bab54075088774b1733fde865d5bd747cbcc7a547c5bc12610e874e26f5e3",
+          "preprocessor_config.json": "efdde1022ea9d76928bf7a9cd53139138f5ba2e466e837f08f6105ab1af1c119",
+          "speech_tokenizer/config.json": "ee65bb901c876664ab8707c487157aa1a6ee57c65969b28fb5ec9dc211e68167",
+          "speech_tokenizer/configuration.json": "6bc26d64eb5024b4d1dab5a52371958b429256d6c9d59787f1f5294a54e0cebd",
+          "speech_tokenizer/preprocessor_config.json": "fcb3805e597e786d4067706e602f6688524640f8d3396790e2e09b5942fcbdfb",
+          "tokenizer_config.json": "dc3c31c3bdaedd5016382bb3cbe07323026775ad51f5a4fb564505992ae4a670",
+          "vocab.json": "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910",
+          "model.safetensors": "bc3c7e785eb961179c25450d1acff03f839e0002f2f3a5aeb67b5735c0fa2adb",
+          "speech_tokenizer/model.safetensors": "836b7b357f5ea43e889936a3709af68dfe3751881acefe4ecf0dbd30ba571258"
+        },
+        "files_bytes": {
+          ".gitattributes": 1519,
+          "README.md": 3263,
+          "config.json": 4908,
+          "generation_config.json": 245,
+          "merges.txt": 1671839,
+          "model.safetensors": 1811626576,
+          "preprocessor_config.json": 127,
+          "speech_tokenizer/config.json": 2336,
+          "speech_tokenizer/configuration.json": 76,
+          "speech_tokenizer/model.safetensors": 682293092,
+          "speech_tokenizer/preprocessor_config.json": 234,
+          "tokenizer_config.json": 7344,
+          "vocab.json": 2776833
+        },
+        "license": "Apache-2.0",
+        "verification": "Non-LFS official Git-blob plus length verified by parent; LFS SHA from official immutable revision API. All files must be SHA verified after target download."
+      }
+    }
+  },
+  "observed_runtime": "observed-runtime.json",
+  "requirements": {
+    "embedding": "requirements-embedding.txt",
+    "tts": "requirements-tts.txt"
+  },
+  "python_version": "3.13.14",
+  "cuda_index": "https://download.pytorch.org/whl/cu130"
+}

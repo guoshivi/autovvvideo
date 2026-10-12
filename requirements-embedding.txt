@@ -1,0 +1,12 @@
+# Python 3.13.14 / Windows x86_64.  The two torch wheels are direct official
+# PyTorch URLs because the observed r2cdn route returned 403 on the target.
+https://download.pytorch.org/whl/cu130/torch-2.14.1%2Bcu130-cp313-cp313-win_amd64.whl#sha256=f064c797bb497daf2b2b5e32b6d794abef087e3f24e758e6c6f8010bd2698319
+https://download.pytorch.org/whl/cu130/torchvision-0.29.1%2Bcu130-cp313-cp313-win_amd64.whl#sha256=8c3f9aea88ab9d28be63d8bc09103d49dccfae26965d8a94c99522417b8c8db1
+torchcodec==0.17.0
+sentence-transformers==6.1.0
+transformers==5.19.0
+huggingface-hub==1.33.0
+numpy==2.5.3
+safetensors==0.8.0
+tokenizers==0.23.3
+av==19.0.1

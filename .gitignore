@@ -1,0 +1,41 @@
+# Credentials and local settings
+.env
+.env.*
+*.key
+*.pem
+credentials/
+config/*.json
+!config/*.json.example
+# Local runtime, data, tools, caches, models and output
+/data/
+/logs/
+/materials/
+/output/
+/models/
+/tools/
+/.runtime/
+/.uv-cache/
+/.uv-python/
+/cache/
+/weights/
+/reports/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.DS_Store
+# Never publish business media or model weights
+*.mp4
+*.mov
+*.mkv
+*.wav
+*.mp3
+*.m4a
+*.aac
+*.flac
+*.pt
+*.safetensors
+*.bin
+*.zip
+*.7z
+*.exe
+*.dll

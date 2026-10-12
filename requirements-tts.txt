@@ -1,0 +1,14 @@
+# Python 3.13.14 / Windows x86_64.  Keep this environment isolated: Qwen TTS
+# is observed with transformers 4.57.3 while the embedding stack uses 5.19.0.
+https://download.pytorch.org/whl/cu130/torch-2.13.0%2Bcu130-cp313-cp313-win_amd64.whl#sha256=cf23236e9deed7d3510d14d9b9592d75d272ef7b35bbfee31a02bea339c73971
+https://download.pytorch.org/whl/cu130/torchvision-0.28.0%2Bcu130-cp313-cp313-win_amd64.whl#sha256=6ac4fadfd4f908f2983a46478d4ef56735b579da57ec215494b9812b6ebd3526
+https://download.pytorch.org/whl/cu130/torchaudio-2.11.0%2Bcu130-cp313-cp313-win_amd64.whl#sha256=ce09a7b144b7982b46c8fe399cf5f91d43dda571e9d6ddba67e928567551f614
+qwen-tts==0.1.1
+transformers==4.57.3
+huggingface-hub==0.36.2
+numpy==2.5.2
+soundfile==0.14.0
+accelerate==1.12.0
+safetensors==0.8.0
+tokenizers==0.22.2
+av==18.1.0
