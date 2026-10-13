@@ -6,13 +6,13 @@ It mirrors exactly what the workbench does while indexing:
   2. cut a 480p window with the same ffmpeg command (GPU first, CPU fallback),
   3. ask the same decoder stack (torchcodec) to open/decode that window.
 
-Everything it finds is written to  deploy\\diagnose_out\\  — send that folder back.
+Everything it finds is written to deploy\\diagnose_out\\; send report.json privately first.
 
 Usage (from the repo root, on the failing machine):
 
   .runtime\\embedding\\Scripts\\python.exe deploy\\diagnose_index.py "D:\\path\\to\\the\\indexed\\folder"
 
-Optional:  --all-windows   test every 10s window instead of just the first two.
+Optional:  --all-windows   test every 10s window instead of first/middle/end samples.
 """
 import argparse, ctypes, ctypes.wintypes as wt, json, os, shutil, subprocess, sys, traceback
 from pathlib import Path
@@ -20,6 +20,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 VIDEO_EXT = {'.mp4', '.mov', '.m4v', '.avi', '.mkv', '.webm', '.wmv', '.ts', '.mts'}
 OUT = ROOT / 'deploy' / 'diagnose_out'
+_dll_handles = []
 
 
 def read_config():
@@ -47,7 +48,7 @@ def prep_runtime(cfg):
         os.environ['PATH'] = tools + os.pathsep + os.environ.get('PATH', '')
         if hasattr(os, 'add_dll_directory'):
             try:
-                os.add_dll_directory(tools)
+                _dll_handles.append(getattr(os, 'add_dll_directory')(tools))
             except OSError:
                 pass
     return tools
@@ -97,7 +98,7 @@ def cut_window(cfg, p, start, seconds, dest):
 
 
 def decode_test(clip):
-    """Exactly what indexing asks of the decoder stack."""
+    """Test the decoder boundary, not the complete embedding-model pipeline."""
     try:
         from torchcodec.decoders import VideoDecoder
         dec = VideoDecoder(str(clip))
@@ -110,27 +111,35 @@ def decode_test(clip):
         except Exception:
             n = None
         return {'ok': True, 'frames': n, 'frame_type': type(frame).__name__}
-    except Exception as e:
-        return {'ok': False, 'error': ''.join(traceback.format_exception_only(type(e), e)).strip()[:600]}
+    except Exception:
+        return {'ok': False, 'error': traceback.format_exc()[-6000:]}
 
 
 def loaded_ffmpeg_dlls():
+    if os.name != 'nt':
+        return {}
     names = ('avcodec-62.dll', 'avcodec-61.dll', 'avcodec-60.dll', 'avformat-62.dll',
              'avformat-61.dll', 'avformat-60.dll', 'avutil-60.dll', 'avutil-59.dll',
              'avutil-58.dll', 'swresample-6.dll', 'swscale-9.dll')
-    k32 = ctypes.windll.kernel32
+    k32 = ctypes.WinDLL('kernel32', use_last_error=True)
+    # ctypes defaults to a 32-bit int return value; Windows HMODULE is pointer-sized.
+    k32.GetModuleHandleW.argtypes = [wt.LPCWSTR]
+    k32.GetModuleHandleW.restype = wt.HMODULE
+    k32.GetModuleFileNameW.argtypes = [wt.HMODULE, wt.LPWSTR, wt.DWORD]
+    k32.GetModuleFileNameW.restype = wt.DWORD
     out = {}
     for name in names:
         h = k32.GetModuleHandleW(name)
         if not h:
             continue
         buf = ctypes.create_unicode_buffer(2048)
-        fn = k32.K32GetModuleFileNameExW
-        fn.argtypes = [wt.HANDLE, wt.HMODULE, wt.LPWSTR, wt.DWORD]
-        fn.restype = wt.DWORD
-        if fn(k32.GetCurrentProcess(), h, buf, 2048):
+        if k32.GetModuleFileNameW(h, buf, 2048):
             out[name] = buf.value
     return out
+
+
+def window_ok(window):
+    return bool(window.get('cut', {}).get('ok') and window.get('decode', {}).get('ok'))
 
 
 def header_hex(p, n=32):
@@ -147,11 +156,19 @@ def main():
     ap.add_argument('--all-windows', action='store_true')
     ap.add_argument('--max-files', type=int, default=30)
     args = ap.parse_args()
+    folder = Path(args.folder)
+    if not folder.is_dir():
+        ap.error('video folder does not exist or cannot be accessed')
+    if args.max_files < 1:
+        ap.error('--max-files must be positive')
 
     cfg = read_config()
     tools = prep_runtime(cfg)
 
-    report = {'python': sys.executable, 'root': str(ROOT), 'tools_dir': tools}
+    report: dict = {'python': sys.executable, 'root': str(ROOT), 'tools_dir': tools}
+    report['scope'] = 'cut + decoder only; not full model indexing or proof of DLL conflict'
+    rc, out, err = run(['nvidia-smi', '--query-gpu=name,driver_version', '--format=csv,noheader'])
+    report['nvidia_driver'] = out.strip() if rc == 0 else err[-500:]
     report['which_ffmpeg'] = shutil.which('ffmpeg')
     rc, out, _ = run([cfg['ffmpeg'], '-version'])
     report['ffmpeg_version'] = (out.splitlines() or ['?'])[0][:200] if rc == 0 else 'ffmpeg not runnable'
@@ -176,8 +193,9 @@ def main():
     except Exception as e:
         report['torchcodec_error'] = str(e)[:300]
 
-    folder = Path(args.folder)
     files = sorted(p for p in folder.rglob('*') if p.is_file() and p.suffix.lower() in VIDEO_EXT)
+    if not files:
+        ap.error('no supported videos found; no diagnosis was performed')
     report['folder'] = str(folder)
     report['video_count'] = len(files)
 
@@ -236,21 +254,24 @@ def main():
                     pass
             row['windows'].append(wres)
         rows.append(row)
-        status = 'FAIL' if any(not (w.get('decode') or {}).get('ok', True) for w in row['windows']) else 'ok'
+        status = 'ok' if all(window_ok(w) for w in row['windows']) else 'FAIL'
         print(f"[{status}] {p.name}  size={row['size']}")
         for wres in row['windows']:
-            if not (wres.get('decode') or {}).get('ok', True):
+            if not wres.get('cut', {}).get('ok'):
+                print('    cut error:', wres.get('cut', {}).get('error', '')[-1000:])
+            elif not wres.get('decode', {}).get('ok'):
                 print('    decode error:', (wres.get('decode') or {}).get('error', '')[:300])
 
     report['files'] = rows
     report['decode_failures'] = failures
+    report['cut_failures'] = sum(not w.get('cut', {}).get('ok') for row in rows for w in row['windows'])
     report['loaded_ffmpeg_dlls'] = loaded_ffmpeg_dlls()
     (OUT / 'report.json').write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
     print()
     print('=' * 60)
     print('environment:')
     for k in ('python', 'torch', 'cuda_available', 'gpu', 'torchvision', 'torchcodec',
-              'ffmpeg_version', 'which_ffmpeg', 'where_ffmpeg', 'tools_dir'):
+              'nvidia_driver', 'ffmpeg_version', 'which_ffmpeg', 'where_ffmpeg', 'tools_dir'):
         if k in report:
             print(f'  {k}: {report[k]}')
     if report.get('loaded_ffmpeg_dlls'):
@@ -258,9 +279,9 @@ def main():
         for k, v in report['loaded_ffmpeg_dlls'].items():
             print(f'    {k} -> {v}')
     print('=' * 60)
-    print(f'videos tested: {len(rows)}  decode failures: {failures}')
+    print(f'videos tested: {len(rows)} / {len(files)}  decode failures: {failures}  cut failures: {report["cut_failures"]}')
     print(f'REPORT + failing clips saved to: {OUT}')
-    print('Send me that whole folder (zip it) — it tells me exactly which file/step breaks.')
+    print('Send report.json privately first. Do not upload footage or machine paths to GitHub.')
     return 0
 
 
