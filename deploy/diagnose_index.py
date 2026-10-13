@@ -23,7 +23,20 @@ OUT = ROOT / 'deploy' / 'diagnose_out'
 
 
 def read_config():
-    cfg = json.loads((ROOT / 'config' / 'workbench.config.json').read_text(encoding='utf-8-sig'))
+    for rel in ('config/workbench.config.json', 'workbench.config.json'):
+        p = ROOT / rel
+        if p.is_file():
+            return resolve_paths(json.loads(p.read_text(encoding='utf-8-sig')))
+    raise SystemExit('config not found: expected config/workbench.config.json (run install.ps1 first)')
+
+
+def resolve_paths(cfg):
+    """Accept both installed configs (absolute paths) and example configs (relative)."""
+    for key in ('tools_dir', 'ffmpeg', 'ffprobe', 'fdk_encoder', 'model_dir', 'tts_model',
+                'tts_python', 'embedding_python', 'gpu_lock_path', 'data_root', 'output_root'):
+        v = cfg.get(key)
+        if isinstance(v, str) and v and not Path(v).is_absolute():
+            cfg[key] = str((ROOT / v).resolve())
     return cfg
 
 
