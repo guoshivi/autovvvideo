@@ -19,7 +19,7 @@
 | 磁盘 | 预留 ≥ 30 GB（首次安装需联网下载约 10–15 GB：两套独立 Python 环境 + 两个模型 + 工具） |
 | 内存 | 32 GB 以上推荐（观测机器 32 GB） |
 
-实测记录：在 **RTX 5060 8GB + 32GB 内存**的 Windows 机器上完整验证通过。
+原工作台的 Qwen 出片流程已在 **RTX 5060 8GB + 32GB 内存**的 Windows 机器上完整验证通过；这不等于公开版的新机安装或新增 Vox 配音已通过目标机验收。
 **RTX 3080 Ti 未在本仓库实测**，请按 `docs/DEPLOY.md` 装好后，实际出一条片作为验收。
 
 ## 快速开始（安装完成后）
@@ -38,6 +38,19 @@
 - 密钥只保存在本机 `config/ai-config.json`（不进仓库、不回显）；使用 AI 时，
   文案与产品信息会发送给你所填写的服务商
 
+## 配音方式：Qwen / Vox（可选试用）
+
+- **Qwen（原配音）**继续作为默认方式；原任务与原环境不自动换模型。
+- **Vox（新配音·试用）**提供自然分享女声、清晰活力女声、沉稳成熟男声、温暖叙事女声；先试听，再决定是否出片。
+- 两种方式在界面里选择，分别记住声音选择。Vox 首次使用一个音色时会准备本地参考样音，后续复用它，避免每句话换音色。
+- 仅更新代码不会下载 Vox 模型。请在目标 Windows 上**先退出工作台**，再按 [Vox 试用说明](docs/VOX.md) 运行独立安装入口：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install-vox.ps1
+```
+
+Vox 使用单独的 `.runtime\vox` 环境，模型从固定官方快照下载并校验；不覆盖 `.runtime\tts` 或 `.runtime\embedding`。安装检查不等于声音效果验收，仍须在目标机生成真实试听与一条成片。
+
 ## 目录结构
 
 ```
@@ -45,6 +58,7 @@ workbench/          服务端代码（HTTP 服务、任务队列、渲染、索�
 static/             网页界面
 reference/          素材理解 / 字幕绘制等核心模块
 install.ps1         安装（下载→校验→两套独立环境→模型→桌面图标）
+install-vox.ps1     可选 Vox 配音安装（独立环境，不覆盖 Qwen）
 doctor.ps1          体检（环境/模型/FFmpeg/AAC/GPU，输出 PASS/WARN/FAIL）
 update.ps1          更新源码（保留配置/数据/模型）
 launch.vbs          无窗口启动器（桌面图标用）

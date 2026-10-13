@@ -22,6 +22,7 @@
 - **soundfile**（内置 libsndfile）：BSD-3-Clause（libsndfile 为 LGPL）
 - **av**（PyAV，内置 FFmpeg 库）：BSD-3-Clause（内置 FFmpeg 为 LGPL/GPL 组合，随 wheel 声明）
 - **qwen-tts**：Apache-2.0（https://github.com/QwenLM/Qwen3-TTS）
+- **voxcpm 2.0.3（可选）**：Apache-2.0（https://github.com/OpenBMB/VoxCPM）；独立环境使用配对的 torch / torchaudio 2.8.0+cu128 与 torchcodec 0.7.0，不替换原 Qwen/选镜依赖。可选下载清单见 `deploy/vox_dependencies.json`。
 - 其余传递依赖以各项目声明为准
 
 ## 模型
@@ -30,6 +31,7 @@
 |---|---|---|
 | **EmbeddingGemma-2**（google） | `914f7f89142e33e77833254d9c9b90c3cef7303b` | **Apache-2.0**；另见 Google Gemma 使用政策（禁用于受限用途）。https://huggingface.co/google/embeddinggemma-2 |
 | **Qwen3-TTS-12Hz-0.6B-CustomVoice**（Qwen） | `85e237c12c027371202489a0ec509ded67b5e4b5` | **Apache-2.0**。https://huggingface.co/Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice |
+| **VoxCPM2（OpenBMB，可选）** | `32279effe8c19989596f05d353d1447f51d9e915` | **Apache-2.0**。https://huggingface.co/openbmb/VoxCPM2；参考音频须有合法授权，不得用于冒充或欺诈。 |
 
 模型权重**不在本仓库**；由安装脚本从 HuggingFace 官方仓库按上述固定版本下载并逐文件校验。
 

@@ -1,0 +1,42 @@
+{
+  "status": "VERIFIED_BY_PARENT",
+  "python_version": "3.11.13",
+  "sdk": {
+    "name": "voxcpm",
+    "version": "2.0.3",
+    "url": "https://files.pythonhosted.org/packages/f5/50/76e912427684f7e71d443d9542802ad33df8764ef3bba954b96feeab41ba/voxcpm-2.0.3-py3-none-any.whl",
+    "sha256": "24da58a30d094a9e9a7ead450ae9cffda0d31eaeba620b61ad99179dd87e486b",
+    "bytes": 88270
+  },
+  "torch_index": "https://download.pytorch.org/whl/cu128",
+  "torch_version": "2.8.0+cu128",
+  "torchaudio_version": "2.8.0+cu128",
+  "model": {
+    "repo_id": "openbmb/VoxCPM2",
+    "revision": "32279effe8c19989596f05d353d1447f51d9e915",
+    "license": "Apache-2.0",
+    "files_sha256": {
+      ".gitattributes": "11ad7efa24975ee4b0c3c3a38ed18737f0658a5f75a0a96787b576a78a023361",
+      "README.md": "c18d2ffbfb2f0aec770481c967842aee6c200cde65f6b033efd892a849986fda",
+      "audiovae.pth": "94b5d51e107e0507d4acc976cfdadb64edd6fd06d1f751dadbf2fd1594274bf1",
+      "config.json": "405f0dcd92f7feba6011ed4eac5c8d4f74cba9712f07fd5cfa3063bbdd95402c",
+      "model.safetensors": "f7f964cfa9da23653baec6e6f7750719977ad944ed9f95fe52fe3a620506891d",
+      "special_tokens_map.json": "068594063e37662c02b21acf42ebb334ef6a74fb810e68a2368f88f08351de76",
+      "tokenization_voxcpm2.py": "84489ea32b6ee0cae22ed5480cacb6df85c46624c3119be9a2021c3649a12729",
+      "tokenizer.json": "f8984687e4a92a3503d521396d454b7d68e9fdaab2a0288eb3536c7c1aa4bc20",
+      "tokenizer_config.json": "e78a3ebb48a0b9437efd1823b6b726c823da89e49dd8bcc90c02419d9baa772b"
+    },
+    "files_bytes": {
+      ".gitattributes": 1519,
+      "README.md": 7939,
+      "audiovae.pth": 376951122,
+      "config.json": 4336,
+      "model.safetensors": 4580080592,
+      "special_tokens_map.json": 1632,
+      "tokenization_voxcpm2.py": 2895,
+      "tokenizer.json": 3676772,
+      "tokenizer_config.json": 5059
+    }
+  },
+  "verification_scope": "SDK wheel bytes hashed; small model files hashed; model LFS SHA-256/bytes read from fixed official snapshot; weights are downloaded and checked only on target Windows; target CUDA/TTS not verified by this manifest."
+}

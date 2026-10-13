@@ -1,5 +1,5 @@
 """Single persistent work queue and product-scoped application operations."""
-import threading,time,json,hashlib,urllib.request,subprocess,os,copy
+import threading,time,json,hashlib,urllib.request,subprocess,os,copy,shutil,io
 from pathlib import Path
 from contextlib import contextmanager
 from .browser import FolderBrowser,AUDIO_EXT,VIDEO_EXT,overlaps,reject_links
@@ -14,6 +14,8 @@ from .media import sha256
 from .fs_authority import lexical_under, AuthorityError, capture_lease
 from .process import run_owned,Cancelled
 from .queue import CommitError as QueueCommitError
+from .voice_engines import (VoiceEngineError, require_vox_config, require_qwen_config,
+                            validate_preview_payload, opaque_preview_id)
 
 class ServiceError(ValueError):pass
 def _render_dest_name(product,job_input,job_id):
@@ -90,6 +92,7 @@ def _gpu_preflight_once(cfg):
 class WorkbenchService:
     def __init__(self,cfg,store,queue,embedder_factory=None,start=True):
         self.cfg=cfg;self.store=store;self.queue=queue;self.browser=FolderBrowser(cfg.nas_roots);self.embedder_factory=embedder_factory or (lambda:ProductionEmbedder(cfg.model_dir));self.stop_flag=threading.Event();self.worker=None;self.gpu_mutex=threading.RLock()
+        self.preview_root=Path(cfg.data_root)/'voice-previews';self.preview_root.mkdir(parents=True,exist_ok=True);reject_links(self.preview_root);self._previews={};self._preview_lock=threading.RLock();self._preview_generation_lock=threading.Lock()
         if start:self.start()
     def start(self):
         if self.worker:return
@@ -259,12 +262,19 @@ class WorkbenchService:
         p,rec=self._ready_index(pid)
         return self._retrieve_snapshot(p,rec,text)
     def enqueue(self,pid,count=1,text=None,settings=None):
+        # Validate the selected optional engine before expensive index lookup
+        # so an unavailable Vox install is reported immediately.
+        raw_product=self.store.get_product(pid)
+        early=ProductionSettings.from_dict(settings if settings is not None else raw_product['settings']).snapshot()
+        if early.get('voice') and early.get('voice_engine','qwen')=='vox':
+            try: require_vox_config(self.cfg)
+            except VoiceEngineError as e: raise ServiceError(str(e)) from e
         p,rec=self._ready_index(pid)
         if not p['output']:raise ServiceError('select output folder')
         if p['archived']:raise ServiceError('archived product')
         text=p['copy']['text'] if text is None else text;lines=split_script(text)
         if not lines:raise ServiceError('script empty')
-        setting=ProductionSettings.from_dict(settings if settings is not None else p['settings']).snapshot()
+        setting=early
         if setting['bgm']:
             bgm=Path(setting['bgm_path']);reject_links(bgm)
             if not bgm.is_file() or bgm.suffix.lower() not in AUDIO_EXT:raise ServiceError('BGM 文件不可用，请重新选择')
@@ -287,6 +297,117 @@ class WorkbenchService:
         with self.store.lock,self.queue.lock:
             jobs=self.queue.enqueue(pid,snap,count,guard)
         return [self.public_job(j) for j in jobs] if isinstance(jobs,list) else [self.public_job(jobs)]
+
+    def _voice_command(self, engine, request, workdir):
+        if engine == 'qwen':
+            py, _model = require_qwen_config(self.cfg)
+            return [str(py), '-m', 'workbench.tts_worker', str(workdir/'voice-request.json'), str(workdir)]
+        py, model, cache = require_vox_config(self.cfg)
+        request.update({'voxcpm_model':str(model), 'voxcpm_cache':str(cache), 'voxcpm_python':str(py), 'ffmpeg':self.cfg.ffmpeg})
+        return [str(py), '-m', 'workbench.voxcpm_worker', str(workdir/'voice-request.json'), str(workdir)]
+
+    def _run_voice_request(self, engine, request, workdir, cancel=None):
+        workdir=Path(workdir);workdir.mkdir(parents=True,exist_ok=True)
+        command=self._voice_command(engine,request,workdir)
+        (workdir/'voice-request.json').write_text(json.dumps(request,ensure_ascii=False),encoding='utf8')
+        use_lock=bool(getattr(self.cfg,'gpu_lock_path',''))
+        with self.gpu_mutex:
+            if getattr(self.cfg,'model_dir',''): gpu_preflight(self.cfg)
+            with gpu_guard(self.cfg) if use_lock else _null():
+                if getattr(self.cfg,'model_dir',''): gpu_preflight(self.cfg)
+                run_owned(command,cwd=self.cfg.project_src,timeout=self.cfg.max_stage_seconds,cancel=cancel,log_dir=workdir)
+        receipt_path=workdir/'voice-result.json'
+        if not receipt_path.is_file(): raise ServiceError('配音没有返回有效结果')
+        try: receipt=json.loads(receipt_path.read_text(encoding='utf8'))
+        except Exception as e: raise ServiceError('配音结果损坏，请重试') from e
+        if receipt.get('success') is not True: raise ServiceError(str(receipt.get('error') or '配音失败'))
+        if receipt.get('engine','qwen') != engine: raise ServiceError('配音引擎收据与所选引擎不一致')
+        voices=receipt.get('voices')
+        if not isinstance(voices,list) or len(voices)!=len(request.get('lines') or []): raise ServiceError('voice receipt incomplete')
+        return receipt
+
+    def _retain_preview_diagnostics(self, workdir):
+        """Keep owned-process logs private when a preview generation fails.
+
+        The preview directory is intentionally removed so a failed request
+        cannot leave a routable media identity behind.  The stdout/stderr
+        files are copied to a private diagnostics directory first; callers of
+        the HTTP preview boundary never receive these paths or their content.
+        """
+        try:
+            workdir = Path(workdir)
+            if not workdir.is_dir():
+                return
+            dest = Path(self.cfg.data_root) / 'voice-preview-logs' / workdir.name
+            dest.mkdir(parents=True, exist_ok=True)
+            reject_links(dest)
+            for log in workdir.glob('stage-*.log'):
+                if log.is_file():
+                    shutil.copy2(log, dest / log.name)
+        except Exception:
+            # Diagnostics must never mask the original preview failure.
+            pass
+
+    def preview_voice(self, body):
+        if not self._preview_generation_lock.acquire(blocking=False):
+            raise ServiceError('已有试听正在生成，请等它完成后再试')
+        try:
+            return self._preview_voice(body)
+        finally:
+            self._preview_generation_lock.release()
+
+    def _preview_voice(self, body):
+        try: req=validate_preview_payload(body)
+        except VoiceEngineError as e: raise ServiceError(str(e)) from e
+        engine=req['engine']
+        if engine=='vox':
+            try: require_vox_config(self.cfg)
+            except VoiceEngineError as e: raise ServiceError(str(e)) from e
+        else:
+            try: require_qwen_config(self.cfg)
+            except VoiceEngineError as e: raise ServiceError(str(e)) from e
+        pid=opaque_preview_id(); d=self.preview_root/pid;d.mkdir(exist_ok=False)
+        try:
+            request={'lines':[req['text']],'speed':req['speed']}
+            if engine=='qwen': request.update({'speaker':req['voice'],'tts_model':self.cfg.tts_model,'ffmpeg':self.cfg.ffmpeg})
+            else: request.update({'voice':req['voice']})
+            receipt=self._run_voice_request(engine,request,d,cancel=self.stop_flag.is_set)
+            row=receipt['voices'][0]
+            if row.get('file')!='voice_000.wav':raise ServiceError('预览音频身份无效')
+            source=d/row['file'];reject_links(source)
+            if not source.is_file():raise ServiceError('预览音频校验失败')
+            # Take one immutable, worker-bound read.  The BytesIO keeps the
+            # original .name so the existing copy hook and its race probe hit
+            # the same production boundary while the bytes themselves cannot
+            # change underneath the copy.
+            source_bytes=source.read_bytes()
+            worker_sha=row.get('sha256')
+            if hashlib.sha256(source_bytes).hexdigest()!=worker_sha:raise ServiceError('预览音频校验失败')
+            audio=d/'preview.wav'
+            src_snapshot=io.BytesIO(source_bytes);src_snapshot.name=str(source)
+            try:
+                with src_snapshot,audio.open('xb') as dst: shutil.copyfileobj(src_snapshot,dst)
+            finally:
+                src_snapshot.close()
+            audio_bytes=audio.read_bytes()
+            digest=hashlib.sha256(audio_bytes).hexdigest();size=len(audio_bytes)
+            if digest!=worker_sha:raise ServiceError('预览音频校验失败')
+            meta={'id':pid,'engine':engine,'voice':req['voice'],'sha256':digest,'bytes':size,'path':str(audio),'created_at':time.time()}
+            with self._preview_lock:self._previews[pid]=meta
+            return {'id':pid,'engine':engine,'voice':req['voice'],'audio_url':f'/api/voice-preview/{pid}?sha256={digest}','sha256':digest,'bytes':size,'cold_start':bool(receipt.get('anchor_cold_start'))}
+        except Exception:
+            self._retain_preview_diagnostics(d)
+            shutil.rmtree(d,ignore_errors=True);raise
+
+    def preview_audio(self,pid,expected_sha=None):
+        if not isinstance(pid,str) or len(pid)!=32 or any(c not in '0123456789abcdef' for c in pid): raise ServiceError('预览身份无效')
+        if not isinstance(expected_sha,str) or len(expected_sha)!=64 or any(c not in '0123456789abcdef' for c in expected_sha): raise ServiceError('预览音频需要有效指纹')
+        with self._preview_lock:meta=copy.deepcopy(self._previews.get(pid))
+        if meta is None: raise KeyError(pid)
+        if expected_sha and expected_sha!=meta['sha256']: raise ServiceError('预览音频指纹不匹配')
+        p=Path(meta['path']);reject_links(p)
+        if not p.is_file() or p.stat().st_size!=meta['bytes'] or hashlib.sha256(p.read_bytes()).hexdigest()!=meta['sha256']: raise ServiceError('预览音频已变化，已拒绝播放')
+        return p,meta
     def cancel(self,pid,jid):
         j=self.queue.get(jid)
         if j['product_id']!=pid:raise KeyError(jid)
@@ -451,15 +572,22 @@ class WorkbenchService:
         jid=j['id'];d=self.queue.root/jid
         if x['settings']['voice']:
             speed=float(x['settings'].get('speed') or 1.0)
-            req=d/'voice-request.json';req.write_text(json.dumps({'lines':x['lines'],'speaker':x['settings']['speaker'],'tts_model':self.cfg.tts_model,'speed':speed,'ffmpeg':self.cfg.ffmpeg},ensure_ascii=False),encoding='utf8')
-            with self.gpu_mutex:
-                gpu_preflight(self.cfg)
-                with gpu_guard(self.cfg):
-                    gpu_preflight(self.cfg);self.queue.update(jid,stage='voice',progress=5)
-                    run_owned([self.cfg.tts_python,'-m','workbench.tts_worker',str(req),str(d)],cwd=self.cfg.project_src,timeout=self.cfg.max_stage_seconds,cancel=cancel,log_dir=d)
-            receipt=json.loads((d/'voice-result.json').read_text(encoding='utf8'))
-            if receipt.get('success') is not True or len(receipt.get('voices',[]))!=len(x['lines']):raise ServiceError('voice receipt incomplete')
+            engine=x['settings'].get('voice_engine','qwen')
+            if engine=='vox':
+                self.queue.update(jid,stage='voice',progress=5)
+                receipt=self._run_voice_request('vox',{'lines':x['lines'],'voice':x['settings'].get('vox_voice','natural_female'),'speed':speed},d,cancel)
+            else:
+                # Keep the original Qwen process/module invocation intact.
+                req=d/'voice-request.json';req.write_text(json.dumps({'lines':x['lines'],'speaker':x['settings']['speaker'],'tts_model':self.cfg.tts_model,'speed':speed,'ffmpeg':self.cfg.ffmpeg},ensure_ascii=False),encoding='utf8')
+                with self.gpu_mutex:
+                    gpu_preflight(self.cfg)
+                    with gpu_guard(self.cfg):
+                        gpu_preflight(self.cfg);self.queue.update(jid,stage='voice',progress=5)
+                        run_owned([self.cfg.tts_python,'-m','workbench.tts_worker',str(req),str(d)],cwd=self.cfg.project_src,timeout=self.cfg.max_stage_seconds,cancel=cancel,log_dir=d)
+                receipt=json.loads((d/'voice-result.json').read_text(encoding='utf8'))
+                if receipt.get('success') is not True or len(receipt.get('voices',[]))!=len(x['lines']):raise ServiceError('voice receipt incomplete')
             if abs(speed-1.0)>1e-9 and receipt.get('speed')!=speed:raise ServiceError('voice receipt speed mismatch')
+            if receipt.get('engine','qwen')!=engine:raise ServiceError('voice receipt engine mismatch')
             x['voices']=receipt['voices']
         else:x['voices']=[]
         x['variant']=j['variant'];x['input_sha256']=j['input_sha256'];x['bgm_sha256']=x.get('bgm_sha256')

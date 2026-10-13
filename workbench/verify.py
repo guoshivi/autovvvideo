@@ -33,7 +33,7 @@ def decode(ffmpeg,path,out,with_audio,cancel=None,timeout=900):
         return y
     return None
 
-def verify_media(path,ffmpeg,ffprobe,timeline,expected=None,voice_wavs=None,mode='silent',cancel=None,timeout=900,eos_receipts=None,frozen_voice_pcm=None):
+def verify_media(path,ffmpeg,ffprobe,timeline,expected=None,voice_wavs=None,mode='silent',cancel=None,timeout=900,eos_receipts=None,frozen_voice_pcm=None,expected_engine='qwen'):
     """Verify a final file against the immutable original-clock PCM contract.
 
     ``expected`` is the complete, read-only final PCM master.  For mixed audio,
@@ -157,6 +157,26 @@ def verify_media(path,ffmpeg,ffprobe,timeline,expected=None,voice_wavs=None,mode
             checks['eos']={'applicable':False,'reason':'media-only validation; model EOS receipt not supplied'}
         else:
             def valid_eos(r):
+                if expected_engine=='vox':
+                    # This branch is a receipt of the stop observer, not a
+                    # user assertion.  Require every observed field with
+                    # exact scalar types (bool is an int subclass), then
+                    # enforce the pinned VoxCPM generation bounds.
+                    required={'engine','natural_stop','observed_natural_stop',
+                              'limit_exhausted','min_len','max_len','executed',
+                              'last_stop_flag','attempts'}
+                    if not isinstance(r,dict) or not required.issubset(r):return False
+                    if type(r['engine']) is not str or r['engine']!='vox':return False
+                    if type(r['natural_stop']) is not bool or r['natural_stop'] is not True:return False
+                    if type(r['observed_natural_stop']) is not bool or r['observed_natural_stop'] is not True:return False
+                    if type(r['limit_exhausted']) is not bool or r['limit_exhausted'] is not False:return False
+                    for key in ('min_len','max_len','executed','last_stop_flag','attempts'):
+                        if type(r[key]) is not int:return False
+                    if r['min_len']<0 or r['max_len']<=r['min_len']+1:return False
+                    if r['last_stop_flag']!=1:return False
+                    if r['executed']<=r['min_len']+1 or r['executed']>r['max_len']:return False
+                    if r['attempts']<1:return False
+                    return True
                 required={'natural_eos','forced_eos_token_id','eos_token_ids','tail_token_ids',
                           'generated_tokens','sequence_shape','padding_trimmed','pad_token_id'}
                 if not isinstance(r,dict) or not required.issubset(r):return False

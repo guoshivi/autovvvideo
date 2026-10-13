@@ -208,7 +208,7 @@ def _encode_mux(config,draft,master,phase,attempt,cancel):
     final=attempt/'final.mp4';_command([config.ffmpeg,'-nostdin','-n','-v','error','-i',str(draft),'-itsoffset',str(-phase/24000),'-i',str(audio),'-map','0:v:0','-map','1:a:0','-c','copy','-movflags','+faststart',str(final)],attempt,config.max_stage_seconds,cancel)
     return final
 
-def encode_with_phase_retry(config,draft,master,timeline,voice_wavs,jobdir,mode,cancel=None,eos_receipts=None,source_receipts=None,frozen_voice_pcm=None):
+def encode_with_phase_retry(config,draft,master,timeline,voice_wavs,jobdir,mode,cancel=None,eos_receipts=None,source_receipts=None,frozen_voice_pcm=None,expected_engine='qwen'):
     failures=[]
     for phase in PHASE_PREFIXES:
         if cancel and cancel():raise Cancelled('codec/cancel')
@@ -216,7 +216,7 @@ def encode_with_phase_retry(config,draft,master,timeline,voice_wavs,jobdir,mode,
             final=_encode_mux(config,draft,master,phase,Path(jobdir)/f'codec-{phase:04d}',cancel)
             if source_receipts is not None:
                 _assert_voice_sources(voice_wavs,source_receipts)
-            report=verify_media(final,config.ffmpeg,config.ffprobe,timeline,master,voice_wavs,mode,cancel,config.max_stage_seconds,eos_receipts,frozen_voice_pcm=frozen_voice_pcm)
+            report=verify_media(final,config.ffmpeg,config.ffprobe,timeline,master,voice_wavs,mode,cancel,config.max_stage_seconds,eos_receipts,frozen_voice_pcm=frozen_voice_pcm,expected_engine=expected_engine)
             report['codec_phase_samples']=phase;report['codec_attempts']=len(failures)+1
             return final,report
         except VerificationFailure as e:
@@ -228,9 +228,10 @@ def encode_with_phase_retry(config,draft,master,timeline,voice_wavs,jobdir,mode,
 def render_job(job,config,jobdir,cancel=None,progress=None):
     d=Path(jobdir);bound=_bind_voice_sources(job,d);draft,timeline,voice_master,wavs=render_video(job,config,d,cancel,progress,_voice_binding=bound);s=job['settings']
     receipts=[v[1] for v in bound];frozen_pcm=tuple(v[2] for v in bound)
+    engine=s.get('voice_engine','qwen')
     eos_receipts=[v.get('eos') for v in receipts] if s['voice'] else None
     if s['voice']:
-        intermediate,intermediate_report=encode_with_phase_retry(config,draft,voice_master,timeline,wavs,d/'voice-intermediate','voice',cancel,eos_receipts,receipts,frozen_pcm)
+        intermediate,intermediate_report=encode_with_phase_retry(config,draft,voice_master,timeline,wavs,d/'voice-intermediate','voice',cancel,eos_receipts,receipts,frozen_pcm,engine)
         _assert_voice_sources(wavs,receipts)
         (d/'voice-intermediate-report.json').write_text(json.dumps(intermediate_report,ensure_ascii=False),encoding='utf8')
     mix_fit=None
@@ -259,10 +260,10 @@ def render_job(job,config,jobdir,cancel=None,progress=None):
     else:master=voice_master;mode='voice' if s['voice'] else 'silent'
     if mode=='silent':
         final=d/'final.mp4';shutil.copyfile(draft,final);report=verify_media(final,config.ffmpeg,config.ffprobe,timeline,None,None,'silent',cancel,config.max_stage_seconds)
-    else:final,report=encode_with_phase_retry(config,draft,master,timeline,wavs if s['voice'] else None,d/'final-codec',mode,cancel,eos_receipts,receipts if s['voice'] else None,frozen_pcm if s['voice'] else None)
+    else:final,report=encode_with_phase_retry(config,draft,master,timeline,wavs if s['voice'] else None,d/'final-codec',mode,cancel,eos_receipts,receipts if s['voice'] else None,frozen_pcm if s['voice'] else None,engine)
     if s['voice']:
         _assert_voice_sources(wavs,receipts)
-    report['timeline']=timeline;report['source_index_id']=job['index_id'];report['input_sha256']=job['input_sha256'];report['voice_wav_sha256']=[v['sha256'] for v in receipts];report['bgm_sha256']=job.get('bgm_sha256');report['eos_receipts']=eos_receipts
+    report['timeline']=timeline;report['source_index_id']=job['index_id'];report['input_sha256']=job['input_sha256'];report['voice_wav_sha256']=[v['sha256'] for v in receipts];report['bgm_sha256']=job.get('bgm_sha256');report['eos_receipts']=eos_receipts;report['voice_engine']=engine;report['voice_completion']='natural_stop' if s['voice'] else 'not_applicable'
     report['speed']=s.get('speed',1.0)
     if mix_fit:report['mix_fit']=mix_fit
     report['shot_usage']=shot_usage(timeline)

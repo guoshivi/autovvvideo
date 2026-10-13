@@ -1,0 +1,7 @@
+# Optional Vox environment only; do not install in the Qwen/embedding environments.
+# Torch and torchaudio are a matched official CUDA 12.8 pair installed first.
+torch==2.8.0+cu128
+torchaudio==2.8.0+cu128
+torchcodec==0.7.0
+transformers==4.57.3
+voxcpm==2.0.3

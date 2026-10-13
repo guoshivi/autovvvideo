@@ -8,6 +8,10 @@ class RuntimeConfig:
     host:str='127.0.0.1';port:int=8765;data_root:str='./data';nas_roots:list[str]=field(default_factory=lambda:['./materials']);output_root:str='./output'
     model_dir:str='';tts_model:str='';tools_dir:str='';font_path:str='';gpu_lock_path:str='./data/gpu.lock';project_src:str='.'
     ffmpeg:str='';ffprobe:str='';fdk_encoder:str='';tts_python:str='';embedding_python:str='';max_index_seconds:int=14400;max_stage_seconds:int=3600;comfy_ports:list[int]=field(default_factory=list)
+    # Optional trial engine.  Empty values keep all existing Qwen-only
+    # configurations valid; production_validate deliberately does not require
+    # these fields because Vox is an opt-in installation.
+    voxcpm_python:str='';voxcpm_model:str='';voxcpm_cache:str=''
     ai_api_key:str='';ai_base_url:str='https://api.deepseek.com';ai_model:str='deepseek-chat'
     @classmethod
     def from_dict(cls,d):
@@ -29,6 +33,8 @@ class RuntimeConfig:
         except ValueError as e:raise ConfigError(str(e)) from None
         if self.ai_api_key and not isinstance(self.ai_api_key,str):raise ConfigError('ai_api_key must be a string')
         if not isinstance(self.ai_model,str) or not self.ai_model:raise ConfigError('ai_model must be a nonempty string')
+        for k in ('voxcpm_python','voxcpm_model','voxcpm_cache'):
+            if not isinstance(getattr(self,k),str):raise ConfigError(f'{k} must be a string')
         return self
     def production_validate(self):
         for k in ('model_dir','tts_model','ffmpeg','ffprobe','fdk_encoder','tts_python','embedding_python','font_path','gpu_lock_path'):

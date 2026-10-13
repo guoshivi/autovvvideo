@@ -1,0 +1,37 @@
+{
+  "sdk_version": "2.0.3",
+  "sdk_sha256": "24da58a30d094a9e9a7ead450ae9cffda0d31eaeba620b61ad99179dd87e486b",
+  "origin": "voxcpm/core.py::VoxCPM._generate from the verified PyPI wheel",
+  "parameters": [
+    "text",
+    "prompt_wav_path",
+    "prompt_text",
+    "reference_wav_path",
+    "cfg_value",
+    "inference_timesteps",
+    "min_len",
+    "max_len",
+    "normalize",
+    "denoise",
+    "retry_badcase",
+    "retry_badcase_max_times",
+    "retry_badcase_ratio_threshold",
+    "streaming"
+  ],
+  "defaults": {
+    "prompt_wav_path": null,
+    "prompt_text": null,
+    "reference_wav_path": null,
+    "cfg_value": 2.0,
+    "inference_timesteps": 10,
+    "min_len": 2,
+    "max_len": 4096,
+    "normalize": false,
+    "denoise": false,
+    "retry_badcase": true,
+    "retry_badcase_max_times": 3,
+    "retry_badcase_ratio_threshold": 6.0,
+    "streaming": false
+  },
+  "voice_design_format": "({description}){text}"
+}

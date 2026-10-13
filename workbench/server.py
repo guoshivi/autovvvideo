@@ -90,6 +90,51 @@ class WorkbenchHandler(BaseHTTPRequestHandler):
         status=404 if isinstance(e,KeyError) else 400
         if isinstance(e,PermissionError):status=403
         if isinstance(e,FileNotFoundError):status=404
+        # Preview generation is the only HTTP boundary allowed to translate
+        # owned-process failures.  run_owned includes commands, absolute
+        # work/log paths, and stderr tails in its private exception text;
+        # those details stay in the private diagnostics copy made by the
+        # service and never cross this response boundary.
+        preview_path=urlparse(self.path).path
+        if preview_path == '/api/voice-preview' or preview_path.startswith('/api/voice-preview/'):
+            from .service import ServiceError, WorkbenchService
+            # A worker can return even an allowlisted phrase. Only fixed
+            # messages raised at these controlled validation sites are public.
+            controlled={
+                '配音引擎只能选择 Qwen（原配音）或 Vox（新配音·试用）',
+                'Vox 声音预设不可用，请重新选择', 'Qwen 说话人无效',
+                '预览请求格式无效', '预览请求只支持引擎、声音、文字和语速',
+                '预览文字无效', '语速需在 0.85–1.5 之间',
+                'Vox 试用环境未安装，请先运行可选的 install-vox.ps1',
+                'Vox 模型未就绪，请先运行可选的 install-vox.ps1',
+                'Vox 缓存目录未配置，请联系管理员完成试用配置',
+                'Qwen 配音环境未就绪，请检查原配音配置',
+                'Qwen 配音模型未就绪，请检查原配音配置',
+                '配音目录不能使用符号链接或重解析点',
+                '已有试听正在生成，请等它完成后再试',
+                '预览身份无效', '预览音频需要有效指纹', '预览音频指纹不匹配',
+                '预览音频已变化，已拒绝播放',
+                '预览音频身份无效', '预览音频校验失败', 'invalid Range',
+                'Host 不可信', 'Origin 必须同源', '跨站 Origin 被拒绝',
+                'Content-Length must occur exactly once', 'invalid Content-Length',
+                'Content-Length out of bounds', 'Transfer-Encoding rejected',
+                'JSON Content-Type required', 'body total deadline exceeded',
+                'body read timeout', 'body exceeds declared length',
+            }
+            origins={ServiceError:{WorkbenchService.preview_voice.__code__,
+                                  WorkbenchService._preview_voice.__code__,
+                                  WorkbenchService.preview_audio.__code__},
+                     ValueError:{WorkbenchHandler.do_GET.__code__,WorkbenchHandler._body.__code__},
+                     PermissionError:{WorkbenchHandler._guard.__code__}}
+            tb=e.__traceback__
+            while tb is not None and tb.tb_next is not None:tb=tb.tb_next
+            if isinstance(e, KeyError):
+                message='试听不存在或已过期'
+            elif tb is not None and tb.tb_frame.f_code in origins.get(type(e),set()) and str(e) in controlled:
+                message=str(e)
+            else:
+                message='试听生成失败，请稍后重试'
+            return self._json({'error':message,'code':'PREVIEW_FAILED'},status)
         self._json({'error':str(e),'type':type(e).__name__},status)
     def do_GET(self):
         try:
@@ -109,6 +154,26 @@ class WorkbenchHandler(BaseHTTPRequestHandler):
                     roots.append({'id':i,'name':tail,'path':str(r)})
                 return self._json(roots)
             if u.path=='/api/ai-settings':return self._json(svc.ai_settings())
+            if u.path.startswith('/api/voice-preview/'):
+                pid=u.path.rsplit('/',1)[-1];p,meta=svc.preview_audio(pid,(q.get('sha256') or [None])[0])
+                # Hash and length are checked on the exact immutable bytes
+                # that will be ranged and written below.  Do not re-open the
+                # mutable path after this snapshot.
+                raw=p.read_bytes();total=len(raw)
+                if total!=meta.get('bytes') or hashlib.sha256(raw).hexdigest()!=meta.get('sha256'):
+                    raise ValueError('预览音频已变化，已拒绝播放')
+                rh=self.headers.get('Range');status=200;start=0;end=total-1;n=total
+                if rh:
+                    import re
+                    m=re.fullmatch(r'bytes=(\d*)-(\d*)',rh.strip())
+                    if not m: raise ValueError('invalid Range')
+                    a,b=m.groups();start=int(a) if a else max(0,total-int(b or 0));end=int(b) if a and b else total-1
+                    if start<0 or start>end or end>=total:
+                        self._response_started=True;self.send_response(416);self.send_header('Content-Range',f'bytes */{total}');self.end_headers();return
+                    status=206;n=end-start+1
+                self._response_started=True;self.send_response(status);self.send_header('Content-Type','audio/wav');self.send_header('Cache-Control','no-store');self.send_header('Accept-Ranges','bytes');self.send_header('Content-Length',str(n))
+                if status==206:self.send_header('Content-Range',f'bytes {start}-{end}/{total}')
+                self.end_headers();self.wfile.write(raw[start:end+1]);return
             if u.path.startswith('/api/retrieval/'):
                 pid=u.path.split('/')[3];return self._json(svc.retrieve(pid,q.get('text',[''])[0]))
             if u.path.startswith('/api/reports/'):
@@ -197,6 +262,7 @@ class WorkbenchHandler(BaseHTTPRequestHandler):
                 if parts[-1]=='open-folder':return self._json(svc.open_folder(pid,body.get('job_id')))
             if u.path=='/api/retrieval':return self._json(svc.retrieve(body['product_id'],body.get('text','')))
             if u.path=='/api/ai-settings':return self._json(svc.set_ai_settings(body))
+            if u.path=='/api/voice-preview':return self._json(svc.preview_voice(body),202)
             self.send_error(404)
         except Exception as e:self._error(e)
 def make_server(cfg,store,queue,service=None):
