@@ -199,7 +199,10 @@ def main():
                 duration = None
         windows = [0.0]
         if duration and duration > 11:
-            windows += [duration / 2]
+            windows.append(duration / 2)
+        if duration and duration > 3:
+            windows.append(max(0.0, duration - 1.2))
+        windows = sorted(set(round(w, 3) for w in windows))[:3]
         if args.all_windows and duration:
             windows = [w for w in range(0, int(duration), 10)]
         row['windows'] = []
