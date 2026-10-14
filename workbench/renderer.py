@@ -8,11 +8,22 @@ from .process import run_owned,Cancelled
 from .browser import reject_links,overlaps
 from .selection import VariantSelector,shot_usage
 from reference.core.videopipe.caption import drawtext_filter,wrap_caption
+from .filters import ffmpeg_filter
 
 PHASE_PREFIXES=(0,64,128,192,256,384,512,640,768,896)
 MIX_SOFT_START=0.79  # soft-knee start (linear), below MIX_CEILING
 MIX_CEILING=0.82     # soft asymptote for the mixed master; observed FDK decode overshoot up to +0.81dB across phases, keeps margin under the -0.5dBFS QA bound
 MIX_PRE_CAP=1.35     # only grossly-hot mixes (BGM track decoding over 0dBFS) attenuate the bed at all
+
+def _filters_python(config):
+    """Resolve the isolated optional filters interpreter."""
+    configured=str(getattr(config,'filters_python','') or '').strip()
+    candidates=[Path(configured)] if configured else []
+    root=Path(getattr(config,'project_src','.') or '.')
+    candidates += [root/'.runtime/filters/Scripts/python.exe',root/'.runtime/filters/bin/python']
+    for candidate in candidates:
+        if candidate.is_file():return str(candidate)
+    raise ValueError('人物轻美颜需要独立 filters Python（配置 filters_python 或 .runtime/filters），当前未安装')
 def _wav(path,pcm):
     x=np.asarray(pcm,dtype=np.float64)
     if x.ndim!=1 or not np.isfinite(x).all() or np.max(np.abs(x),initial=0)>=1:raise ValueError('render/PCM invalid or clipped')
@@ -26,7 +37,13 @@ def _probe_duration(ffprobe,path):
 def _filter(settings,caption_file,font_file):
     vf='scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2:black,setsar=1'
     if settings['dedup']=='light':vf+=',eq=contrast=1.012:saturation=1.015'
-    if settings['dedup']=='double':vf+=',hflip,eq=contrast=1.025:saturation=1.03'
+    if settings['dedup']=='double':
+        # Text and logos must keep their reading direction.  A tiny geometric
+        # crop plus restrained colour shift creates a distinct render without
+        # horizontal/vertical flips or a 180° rotation.
+        vf+=',scale=1102:1960,crop=1080:1920,eq=contrast=1.025:saturation=1.03'
+    visual=ffmpeg_filter(settings.get('visual_filter','original'),settings.get('visual_filter_strength',.35))
+    if visual:vf+=','+visual
     if caption_file:vf+=','+drawtext_filter(caption_file,font_file,settings['subtitle_size'],settings['subtitle_bottom'],settings.get('subtitle_border',3))
     return vf
 
@@ -70,15 +87,17 @@ def _bind_voice_sources(job,jobdir):
         pcm.setflags(write=False);bindings.append((path,receipt,pcm))
     return tuple(bindings)
 
-def render_video(job,config,jobdir,cancel=None,progress=None,_voice_binding=None):
+def render_video(job,config,jobdir,cancel=None,progress=None,_voice_binding=None,_return_beauty=False):
     """job snapshot has immutable lines, selected candidates and source fingerprints."""
     d=Path(jobdir);s=job['settings'];lines=job['lines'];mapping=job['mapping'];voice=job.get('voices',[])
     if len(mapping)!=len(lines) or (s['voice'] and len(voice)!=len(lines)):raise ValueError('render/count: sentence/mapping/voice mismatch')
     if not lines:raise ValueError('render/script: empty')
     bound=_bind_voice_sources(job,d) if _voice_binding is None else _voice_binding
     if s['voice'] and len(bound)!=len(lines):raise ValueError('render/voice receipt count mismatch')
-    selector=VariantSelector(job.get('variant',0),int(s.get('shot_reuse') or 0))
-    clips=[];timeline=[];total_frames=0;voice_wavs=[]
+    # Cross-batch allocation is frozen in the queue-reordered mapping.  Keep
+    # VariantSelector's legacy per-film variant semantics intact.
+    selector=VariantSelector(0 if job.get('selection_context') else job.get('variant',0),int(s.get('shot_reuse') or 0))
+    clips=[];timeline=[];total_frames=0;voice_wavs=[];beauty_reports=[]
     intro=s.get('intro');outro=s.get('outro')
     if intro:
         card,intro_frames=_build_card(config,d,'intro',intro,cancel)
@@ -98,19 +117,50 @@ def render_video(job,config,jobdir,cancel=None,progress=None,_voice_binding=None
         frames=math.ceil(want*30);required=frames/30;cap=None
         if s['subtitles']:
             cap=d/f'cap_{i:03d}.txt';cap.write_text(wrap_caption(line),encoding='utf8')
-        remaining=frames;local=[];turn=0;chosen=[]
+        remaining=frames;local=[];turn=0;chosen=[];cuts=[];sentence_start=total_frames/30
         picker=selector.new_sentence(candidates)
         while remaining>0:
             c=selector.pick(picker);chosen.append(c);p=Path(c['path']);reject_links(p)
             if not p.is_file() or sha256(p)!=c['source_sha256']:raise ValueError(f'render/source SHA sentence={i} changed')
             sec=float(c['seconds']);start=float(c['start'])
             nframes=min(remaining,max(1,math.floor(sec*30)));t=nframes/30
-            dest=d/f'cut_{i:03d}_{turn:03d}.mp4';vf=_filter(s,str(cap) if cap else None,Path(config.font_path).name if cap else None)
+            dest=d/f'cut_{i:03d}_{turn:03d}.mp4';vf=_filter(s,None if s.get('beauty') else (str(cap) if cap else None),Path(config.font_path).name if cap and not s.get('beauty') else None)
             # Copy font to controlled ASCII basename, avoiding path escaping in filtergraph.
             if cap and not (d/Path(config.font_path).name).exists():shutil.copyfile(config.font_path,d/Path(config.font_path).name)
             _command([config.ffmpeg,'-nostdin','-n','-v','error','-ss',f'{start:.6f}','-t',f'{t:.6f}','-i',str(p),'-vf',vf,'-an','-c:v','libx264','-preset','veryfast','-crf','20','-r','30','-frames:v',str(nframes),'-pix_fmt','yuv420p',str(dest)],d,config.max_stage_seconds,cancel)
             if not dest.is_file():raise ValueError(f'render/cut sentence={i} missing')
+            if s.get('beauty'):
+                # Beauty is an explicit opt-in worker.  It streams frames
+                # through a local OpenCV ROI pass and then re-encodes H.264;
+                # subtitles are added only after the face pass below.
+                req=d/f'beauty-{i:03d}-{turn:03d}.json';raw=d/f'beauty-{i:03d}-{turn:03d}.mp4';rep=d/f'beauty-{i:03d}-{turn:03d}.report.json'
+                req.write_text(json.dumps({'source':str(dest),'output':str(raw),'report':str(rep),'strength':s.get('beauty_strength',.25),'fps':30,'width':1080,'height':1920,'expected_frames':nframes},ensure_ascii=False),encoding='utf8')
+                worker=Path(getattr(config,'project_src','.') or '.').absolute()/'workbench'/'beauty_worker.py'
+                _command([_filters_python(config),str(worker),str(req)],d,config.max_stage_seconds,cancel)
+                if not raw.is_file() or not rep.is_file():raise ValueError('render/beauty worker produced no output')
+                beauty_meta=json.loads(rep.read_text(encoding='utf8'))
+                if int(beauty_meta.get('faces_detected') or 0)==0:
+                    # Preserve the already validated original cut when no face
+                    # exists.  The report records that beauty was enabled but
+                    # no pixels were changed and no beauty output was used.
+                    beauty_meta['encoded_path_used']=False;beauty_meta['subtitle_encoded']=bool(cap);beauty_reports.append(beauty_meta)
+                    if cap:
+                        captioned=d/f'captioned-{i:03d}-{turn:03d}.mp4'
+                        _command([config.ffmpeg,'-nostdin','-n','-v','error','-i',str(dest),'-vf',drawtext_filter(str(cap),Path(config.font_path).name,s['subtitle_size'],s['subtitle_bottom'],s.get('subtitle_border',3)),'-an','-c:v','libx264','-preset','veryfast','-crf','20','-r','30','-frames:v',str(nframes),'-pix_fmt','yuv420p',str(captioned)],d,config.max_stage_seconds,cancel)
+                        dest.unlink(missing_ok=True);captioned.replace(dest)
+                    raw.unlink(missing_ok=True);req.unlink(missing_ok=True);rep.unlink(missing_ok=True)
+                    local.append(dest);clips.append(dest);remaining-=nframes;turn+=1
+                    cut_start=sentence_start+sum(x['used_seconds'] for x in cuts)
+                    cuts.append({'candidate_ref':{'source_sha256':c.get('source_sha256'),'index_id':c.get('index_id'),'source_start':start,'seconds':sec},'used_seconds':round(nframes/30,6),'frames':nframes,'output_start':round(cut_start,6),'output_end':round(cut_start+nframes/30,6)})
+                    continue
+                beauty_out=d/f'beauty-final-{i:03d}-{turn:03d}.mp4'
+                tail_vf=drawtext_filter(str(cap),Path(config.font_path).name,s['subtitle_size'],s['subtitle_bottom'],s.get('subtitle_border',3)) if cap else 'null'
+                _command([config.ffmpeg,'-nostdin','-n','-v','error','-i',str(raw),'-vf',tail_vf,'-an','-c:v','libx264','-preset','veryfast','-crf','20','-r','30','-frames:v',str(nframes),'-pix_fmt','yuv420p',str(beauty_out)],d,config.max_stage_seconds,cancel)
+                dest.unlink(missing_ok=True);beauty_out.replace(dest)
+                beauty_meta['encoded_path_used']=True;beauty_reports.append(beauty_meta)
             local.append(dest);clips.append(dest);remaining-=nframes;turn+=1
+            cut_start=sentence_start+sum(x['used_seconds'] for x in cuts)
+            cuts.append({'candidate_ref':{'source_sha256':c.get('source_sha256'),'index_id':c.get('index_id'),'source_start':start,'seconds':sec},'used_seconds':round(nframes/30,6),'frames':nframes,'output_start':round(cut_start,6),'output_end':round(cut_start+nframes/30,6)})
             if 0<remaining<=3:
                 # A ≤3-frame sliver tail (≤0.10s, invisible on screen) is not
                 # worth cutting: tiny fragments destabilize concat frame
@@ -126,7 +176,8 @@ def render_video(job,config,jobdir,cancel=None,progress=None,_voice_binding=None
         if slack<0 or slack>3:raise ValueError(f'render/frames sentence={i} measured={segment_frames} required={frames}')
         start_time=total_frames/30;total_frames+=segment_frames;end_time=total_frames/30
         if wav and end_time-start_time<len(vpcm)/24000+.20:raise ValueError(f'render/voice margin sentence={i}')
-        timeline.append({'index':i,'start':start_time,'end':end_time,'voice_samples':len(vpcm) if wav else 0,'segments':[p.name for p in local],'sources':chosen})
+        shortage=len({(c.get('source_sha256'),round(float(c.get('start') or 0),1)) for c in chosen})<len(chosen)
+        timeline.append({'index':i,'start':start_time,'end':end_time,'voice_samples':len(vpcm) if wav else 0,'segments':[p.name for p in local],'sources':chosen,'cuts':cuts,'selection_warning':'candidate_shortage/cap_overrun' if shortage else None})
         if progress:progress(i+1,len(lines))
     if outro:
         card,outro_frames=_build_card(config,d,'outro',outro,cancel)
@@ -144,6 +195,7 @@ def render_video(job,config,jobdir,cancel=None,progress=None,_voice_binding=None
             if start+len(pcm)>len(master):raise ValueError(f'render/voice truncate sentence={i}')
             master[start:start+len(pcm)]=pcm
     master.setflags(write=False)
+    if _return_beauty:return draft,timeline,master,voice_wavs,beauty_reports
     return draft,timeline,master,voice_wavs
 
 def _assert_voice_sources(wavs, receipts):
@@ -226,7 +278,7 @@ def encode_with_phase_retry(config,draft,master,timeline,voice_wavs,jobdir,mode,
     raise VerificationFailure('codec','phase search',failures,'one of bounded phases passes full original-baseline QA')
 
 def render_job(job,config,jobdir,cancel=None,progress=None):
-    d=Path(jobdir);bound=_bind_voice_sources(job,d);draft,timeline,voice_master,wavs=render_video(job,config,d,cancel,progress,_voice_binding=bound);s=job['settings']
+    d=Path(jobdir);bound=_bind_voice_sources(job,d);draft,timeline,voice_master,wavs,beauty_reports=render_video(job,config,d,cancel,progress,_voice_binding=bound,_return_beauty=True);s=job['settings']
     receipts=[v[1] for v in bound];frozen_pcm=tuple(v[2] for v in bound)
     engine=s.get('voice_engine','qwen')
     eos_receipts=[v.get('eos') for v in receipts] if s['voice'] else None
@@ -267,6 +319,8 @@ def render_job(job,config,jobdir,cancel=None,progress=None):
     report['speed']=s.get('speed',1.0)
     if mix_fit:report['mix_fit']=mix_fit
     report['shot_usage']=shot_usage(timeline)
+    if job.get('selection_context'):report['selection_context']=copy.deepcopy(job['selection_context'])
+    if s.get('beauty'):report['beauty']={'enabled':True,'frames':sum(x.get('frames',0) for x in beauty_reports),'frames_with_faces':sum(x.get('frames_with_faces',0) for x in beauty_reports),'faces_detected':sum(x.get('faces_detected',0) for x in beauty_reports),'no_op':not any(x.get('faces_detected',0) for x in beauty_reports)}
     cover_meta=s.get('cover')
     if cover_meta:
         info=_build_cover(config,d,final,cover_meta,cancel)

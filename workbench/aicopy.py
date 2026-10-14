@@ -7,6 +7,7 @@ absolute claims, no unsourced product claims).
 """
 import json, urllib.request, urllib.error
 from .ai_endpoint import normalize_endpoint
+from .copy_tools import parse_script_variants
 
 class AIError(ValueError): pass
 
@@ -43,9 +44,12 @@ _MODE_EXTRA = {
              "第X句：「原文片段」——问题类型（价格促销/医疗功效/绝对化用语/无依据宣称/平台违禁词）＋修改建议。"
              "没问题的句子不写；全部无问题时只输出一行：未发现明显违规。不要重写全文、不要多余解释。",
     'fit': "这一次是按目标时长改写：把用户给的口播文案改写成适合指定时长口播的版本。"
-           "中文口播约每秒 4 个汉字（含自然停顿），按目标秒数估算全文总字数（目标秒数 × 4）；"
+           "按调用方提供的实测或估计语速预算字数；"
            "保持原意与核心卖点，可以合并、扩写或精简句子；一句一意、短句为主；"
            "严格遵守全部禁用规则；一句一行，只输出改写后的文案，不要解释。",
+    'variants': "这一次是 AI 裂变：把用户文案改写成多份不同开头和表达、但事实核心一致的短稿。"
+                "只能使用用户提供的信息，禁止编造功能、成分、数据、价格或医疗效果。"
+                "严格只输出 JSON：{\"variants\":[\"稿件1\",\"稿件2\"]}，不要 Markdown、不要解释。",
 }
 
 def build_messages(mode, text, brief):
@@ -64,7 +68,7 @@ def build_messages(mode, text, brief):
                 f"目标人群：{audience or '普通家庭用户'}\n"
                 f"偏好风格：{style or '亲切、生活化'}\n"
                 f"请按规则直接输出口播文案正文。")
-    elif mode in ('split', 'pack', 'audit', 'fit'):
+    elif mode in ('split', 'pack', 'audit', 'fit', 'variants'):
         body = str(text or '').strip()
         if not body:
             raise AIError('先在编辑框里写好文案，再点这个按钮')
@@ -76,8 +80,23 @@ def build_messages(mode, text, brief):
                 seconds = 0
             if not 3 <= seconds <= 600:
                 raise AIError('先在设置行里填「目标时长」（3–600 秒），再点「按时长优化」')
+            try:speed=float(brief.get('speed') or 1.0)
+            except (TypeError,ValueError):raise AIError('语速需在 0.85–1.5 之间') from None
+            if not 0.85<=speed<=1.5:raise AIError('语速需在 0.85–1.5 之间')
+            cps=brief.get('chars_per_second')
+            try:cps=float(cps)
+            except (TypeError,ValueError):
+                try:cps=4.0*speed
+                except (TypeError,ValueError):cps=4.0
+            cps=max(1.0,min(8.0,cps))
+            budget=brief.get('chars_budget')
+            if type(budget) is not int or budget<1:budget=round(seconds*cps)
             user = ((f"产品：{name}\n" if name else '') +
-                    f"目标时长：{seconds} 秒（全文约 {seconds * 4} 个汉字）\n文案：\n{body}\n\n请按要求直接输出改写后的文案。")
+                    f"目标时长：{seconds} 秒（所选语速 {speed:.2f}×，按每秒约 {cps:.2f} 个汉字，扣除停顿及画面固定时长后全文约 {budget} 个汉字）\n文案：\n{body}\n\n请按要求直接输出改写后的文案。")
+        elif mode == 'variants':
+            try:n=max(2,min(20,int(brief.get('count') or 3)))
+            except (TypeError,ValueError):n=3
+            user=((f"产品：{name}\n" if name else '')+f"需要 {n} 份稿件。\n文案：\n{body}\n\n严格按 JSON 格式返回。")
         else:
             user = ((f"产品：{name}\n" if name else '') + f"文案：\n{body}\n\n请按要求直接输出。")
     else:
@@ -135,9 +154,13 @@ def run(base_url, api_key, model, mode, text, brief):
     payload = {
         'model': str(model or 'deepseek-chat'),
         'messages': build_messages(mode, text, brief),
-        'temperature': {'split': 0.3, 'audit': 0.2, 'fit': 0.8}.get(mode, 1.0),
-        'max_tokens': 1200 if mode in ('pack', 'audit') else 800,
+        'temperature': {'split': 0.3, 'audit': 0.2, 'fit': 0.8, 'variants': 0.9}.get(mode, 1.0),
+        'max_tokens': 1600 if mode in ('pack', 'audit', 'variants') else 800,
         'stream': False,
     }
     data = _post(url, payload, key)
-    return extract_text(data)
+    result=extract_text(data)
+    if mode=='variants':
+        try: return json.dumps({'variants':parse_script_variants(result)},ensure_ascii=False)
+        except ValueError as exc: raise AIError(str(exc)) from None
+    return result

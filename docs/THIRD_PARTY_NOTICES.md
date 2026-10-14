@@ -44,3 +44,10 @@
 
 - AAC 编码相关专利许可不随本仓库或上述开源组件授予，商用前请自行评估。
 - 使用 AI 服务商（如 DeepSeek）产生的内容与费用由使用者承担，遵守对应服务条款。
+
+## 本次可选 filters 依赖
+
+- **opencv-python-headless 4.10.0.84**：Apache-2.0；仅安装在独立 `.runtime/filters` 环境，用于 Haar cascade 局部人脸检测与 ROI 处理。
+- **numpy 2.1.3**：BSD-3-Clause；与 filters 环境配对，不替换工作台既有 embedding/TTS 环境。
+
+本项目没有引入 MediaPipe、CodeFormer 或 GFPGAN；GitHub 高星项目仅作为选型和许可证参考。

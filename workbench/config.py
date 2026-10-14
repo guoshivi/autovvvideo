@@ -11,7 +11,7 @@ class RuntimeConfig:
     # Optional trial engine.  Empty values keep all existing Qwen-only
     # configurations valid; production_validate deliberately does not require
     # these fields because Vox is an opt-in installation.
-    voxcpm_python:str='';voxcpm_model:str='';voxcpm_cache:str=''
+    voxcpm_python:str='';voxcpm_model:str='';voxcpm_cache:str='';filters_python:str=''
     ai_api_key:str='';ai_base_url:str='https://api.deepseek.com';ai_model:str='deepseek-chat'
     @classmethod
     def from_dict(cls,d):
@@ -33,7 +33,7 @@ class RuntimeConfig:
         except ValueError as e:raise ConfigError(str(e)) from None
         if self.ai_api_key and not isinstance(self.ai_api_key,str):raise ConfigError('ai_api_key must be a string')
         if not isinstance(self.ai_model,str) or not self.ai_model:raise ConfigError('ai_model must be a nonempty string')
-        for k in ('voxcpm_python','voxcpm_model','voxcpm_cache'):
+        for k in ('voxcpm_python','voxcpm_model','voxcpm_cache','filters_python'):
             if not isinstance(getattr(self,k),str):raise ConfigError(f'{k} must be a string')
         return self
     def production_validate(self):

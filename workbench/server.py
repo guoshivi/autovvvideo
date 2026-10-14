@@ -176,6 +176,9 @@ class WorkbenchHandler(BaseHTTPRequestHandler):
                 self.end_headers();self.wfile.write(raw[start:end+1]);return
             if u.path.startswith('/api/retrieval/'):
                 pid=u.path.split('/')[3];return self._json(svc.retrieve(pid,q.get('text',[''])[0]))
+            if u.path.startswith('/api/products/') and u.path.endswith('/timing'):
+                pid=u.path.strip('/').split('/')[2]
+                return self._json(svc.timing(pid,q.get('text',[''])[0]))
             if u.path.startswith('/api/reports/'):
                 jid=u.path.split('/')[3];j=svc.queue.get(jid)
                 if not q.get('product_id') or j['product_id']!=q['product_id'][0]:raise PermissionError('商品范围不匹配')
@@ -256,6 +259,7 @@ class WorkbenchHandler(BaseHTTPRequestHandler):
                     if 'path' in body:return self._json(svc.select_path(pid,parts[-1],body['path']))
                     return self._json(svc.select(pid,parts[-1],int(body['root_id']),body.get('token','')))
                 if parts[-1]=='index':return self._json(svc.request_index(pid),202)
+                if parts[-1]=='timing':return self._json(svc.timing(pid,body.get('text',''),body.get('settings')))
                 if parts[-1]=='jobs':return self._json(svc.enqueue(pid,int(body.get('count',1)),body.get('text'),body.get('settings')),202)
                 if parts[-1]=='cancel':return self._json(svc.cancel(pid,body['job_id']))
                 if parts[-1]=='pause':return self._json(svc.pause(pid,body['job_id']))

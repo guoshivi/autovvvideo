@@ -1,10 +1,12 @@
 """Single persistent work queue and product-scoped application operations."""
-import threading,time,json,hashlib,urllib.request,subprocess,os,copy,shutil,io
+import threading,time,json,hashlib,urllib.request,subprocess,os,copy,shutil,io,dataclasses
 from pathlib import Path
 from contextlib import contextmanager
 from .browser import FolderBrowser,AUDIO_EXT,VIDEO_EXT,overlaps,reject_links
 from .settings import ProductionSettings
 from .copybook import split_script
+from .copy_tools import clean_punctuation, parse_script_variants
+from .timing import estimate_timing
 from .indexer import Indexer,ProductionEmbedder,collect_source_fingerprints,expected_files_unchanged
 from .renderer import render_job,export_validated
 from .selection import spread_candidates
@@ -144,6 +146,7 @@ def _gpu_preflight_once(cfg):
 class WorkbenchService:
     def __init__(self,cfg,store,queue,embedder_factory=None,start=True):
         self.cfg=cfg;self.store=store;self.queue=queue;self.browser=FolderBrowser(cfg.nas_roots);self.embedder_factory=embedder_factory or (lambda:ProductionEmbedder(cfg.model_dir));self.stop_flag=threading.Event();self.worker=None;self.gpu_mutex=threading.RLock();self._running_job_id=None
+        self._timing_mapping_cache={};self._timing_cache_lock=threading.RLock()
         self.preview_root=Path(cfg.data_root)/'voice-previews';self.preview_root.mkdir(parents=True,exist_ok=True);reject_links(self.preview_root);self._previews={};self._preview_lock=threading.RLock();self._preview_generation_lock=threading.Lock()
         if start:self.start()
     def start(self):
@@ -313,6 +316,58 @@ class WorkbenchService:
     def retrieve(self,pid,text):
         p,rec=self._ready_index(pid)
         return self._retrieve_snapshot(p,rec,text)
+    @staticmethod
+    def _timing_text_key(pid,text):
+        return (str(pid), ' '.join(str(text or '').split()))
+    def _free_timing_mapping(self,pid,text):
+        key=self._timing_text_key(pid,text)
+        with self._timing_cache_lock:
+            cached=self._timing_mapping_cache.get(key)
+        if cached is not None:return copy.deepcopy(cached)
+        for job in reversed(self.queue.all(pid)):
+            inp=job.get('input') or {}
+            if inp.get('kind')!='render':continue
+            if self._timing_text_key(pid,'\n'.join(map(str,inp.get('lines') or [])))==key and inp.get('mapping') is not None:
+                return copy.deepcopy(inp['mapping'])
+        return None
+    def timing(self,pid,text,settings=None,*,retrieve=False):
+        """Return a measured-window duration plan without invoking TTS/AI."""
+        p,rec=self._ready_index(pid)
+        lines=split_script(text if text is not None else p['copy']['text'])
+        setting=ProductionSettings.from_dict({**(p.get('settings') or {}),**(settings or {})}).snapshot()
+        query=text if text is not None else p['copy']['text']
+        mapping=self._free_timing_mapping(pid,query) if lines else []
+        retrieval_warning=''
+        if retrieve and lines:
+            try:
+                mapping=[row['candidates'] for row in self._retrieve_snapshot(p,rec,query)]
+                with self._timing_cache_lock:self._timing_mapping_cache[self._timing_text_key(pid,query)]=copy.deepcopy(mapping)
+            except Exception:
+                mapping=None;retrieval_warning='检索不可用，按索引总容量估计。'
+        receipts=[]
+        for job in self.queue.all(pid):
+            inp=job.get('input') or {}
+            if job.get('status')!='done' or inp.get('kind')!='render':continue
+            if (inp.get('settings') or {}).get('voice_engine','qwen')!=setting.get('voice_engine','qwen'):continue
+            if (inp.get('settings') or {}).get('speaker','Serena')!=setting.get('speaker','Serena'):continue
+            if (inp.get('settings') or {}).get('vox_voice','natural_female')!=setting.get('vox_voice','natural_female'):continue
+            proof=(job.get('report') or {}).get('voice_calibration') or {}
+            worker=Path(self.cfg.project_src)/'workbench'/('voxcpm_worker.py' if setting.get('voice_engine')=='vox' else 'tts_worker.py')
+            if not worker.is_file() or proof.get('worker_sha256')!=sha256(worker) or proof.get('input_sha256')!=job.get('input_sha256') or proof.get('engine')!=setting.get('voice_engine','qwen'):continue
+            if proof.get('voice')!=(setting.get('vox_voice') if proof['engine']=='vox' else setting.get('speaker')):continue
+            prior_speed=(inp.get('settings') or {}).get('speed')
+            if type(prior_speed) not in (int,float) or prior_speed<=0 or proof.get('speed')!=prior_speed:continue
+            for line,row in zip(inp.get('lines') or [],proof.get('voices') or []):
+                wav=self.queue.root/job['id']/str(row.get('file') or '')
+                if wav.name!=row.get('file') or not wav.is_file() or sha256(wav)!=row.get('sha256'):continue
+                from .verify import read_wav
+                samples=len(read_wav(wav))
+                if type(row.get('samples')) is int and samples==row['samples']:
+                    receipts.append({'samples':samples,'characters':len(str(line)),'speed':prior_speed})
+        est=estimate_timing(lines,rec,speed=setting.get('speed',1.0),receipts=receipts,mapping=mapping,settings=setting)
+        if mapping is None:
+            est=dataclasses.replace(est,warning=(retrieval_warning or '未按当前文案匹配，显示索引总容量。'))
+        return {'lines':len(lines),'estimate':est.as_dict(),'speed':setting.get('speed',1.0),'voice_engine':setting.get('voice_engine','qwen'),'indexed':bool(rec)}
     def enqueue(self,pid,count=1,text=None,settings=None):
         # Validate the selected optional engine before expensive index lookup
         # so an unavailable Vox install is reported immediately.
@@ -543,12 +598,36 @@ class WorkbenchService:
         if p['archived']:raise ServiceError('archived product')
         body=body or {}
         mode=str(body.get('mode') or 'generate')
+        if mode=='clean':
+            return {'text':clean_punctuation(str(body.get('text') or ''))}
         ov=self._ai_overrides()
         base=ov.get('base_url') or self.cfg.ai_base_url
         key=ov.get('api_key',self.cfg.ai_api_key)
         model=ov.get('model') or self.cfg.ai_model
+        brief=dict(body.get('brief') or {})
+        if mode=='fit':
+            target=brief.get('target_seconds')
+            if type(target) is not int or not 3<=target<=600:raise ServiceError('目标时长需为 3–600 秒')
+            plan=self.timing(pid,str(body.get('text') or ''),body.get('settings'),retrieve=True)
+            est=plan['estimate'];setting=ProductionSettings.from_dict({**(p.get('settings') or {}),**(body.get('settings') or {})}).snapshot()
+            if est['available_seconds']<=0:raise ServiceError('当前文案没有可用的索引匹配窗口')
+            fixed=sum(float((setting.get(k) or {}).get('seconds') or 0) for k in ('intro','outro'))
+            usable=min(float(target)-fixed,est['available_seconds'])
+            if usable<=0:raise ServiceError('目标时长没有可用口播空间')
+            lines=split_script(str(body.get('text') or ''))
+            budget=max(1,int(max(0,usable-.30*len(lines))*est['chars_per_second']))
+            brief.update(speed=setting['speed'],chars_per_second=est['chars_per_second'],chars_budget=budget)
+        if mode=='variants':
+            requested=brief.get('count',3)
+            if type(requested) is not int or not 2<=requested<=20:raise ServiceError('裂变数量需为 2–20 的整数')
         try:
-            return {'text':ai_run(base,key,model,mode,str(body.get('text') or ''),body.get('brief') or {})}
+            result=ai_run(base,key,model,mode,str(body.get('text') or ''),brief)
+            if mode=='variants':
+                try: rows=parse_script_variants(result)
+                except ValueError as exc: raise ServiceError(str(exc)) from None
+                rows=rows[:requested]
+                return {'variants':rows,'text':'\n---\n'.join(rows),'requested':requested,'produced':len(rows),'partial':len(rows)<requested,'reason':'AI 返回的有效且不同的稿件不足' if len(rows)<requested else ''}
+            return {'text':result}
         except AIError as e:
             raise ServiceError(str(e)) from e
     def save_cover_file(self,pid,raw,content_type):
@@ -729,10 +808,13 @@ class WorkbenchService:
             if receipt.get('engine','qwen')!=engine:raise ServiceError('voice receipt engine mismatch')
             x['voices']=receipt['voices']
         else:x['voices']=[]
-        x['variant']=j['variant'];x['input_sha256']=j['input_sha256'];x['bgm_sha256']=x.get('bgm_sha256')
+        x['variant']=j['variant'];x['selection_rank']=x.get('selection_rank',j.get('selection_rank',j['variant']));x['input_sha256']=j['input_sha256'];x['bgm_sha256']=x.get('bgm_sha256')
         self.queue.update(jid,stage='render',progress=20)
         def progress(n,total):self.queue.update(jid,stage='render',progress=20+round(50*n/total))
         final,report=render_job(x,self.cfg,d,cancel,progress)
+        if x['settings']['voice']:
+            worker=Path(self.cfg.project_src)/'workbench'/('voxcpm_worker.py' if engine=='vox' else 'tts_worker.py')
+            report['voice_calibration']={'input_sha256':j['input_sha256'],'worker_sha256':sha256(worker),'engine':engine,'voice':x['settings'].get('vox_voice') if engine=='vox' else x['settings'].get('speaker'),'speed':speed,'voices':copy.deepcopy(receipt['voices'])}
         if cancel():raise Cancelled('render/cancel before export')
         self.queue.update(jid,stage='export',progress=85)
         lexical_under(x['output']['path'], x['output']['path'])

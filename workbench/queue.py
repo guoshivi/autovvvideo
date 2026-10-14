@@ -1,5 +1,6 @@
 import json, threading, uuid, time, copy, os, hashlib
 from pathlib import Path
+from .selection import diversity_rank, recent_openings, prefix_plan
 from .fs_authority import commit_scope, assert_mutation_allowed, replace_with_retry
 class JobQueue:
     def __init__(self,path):
@@ -83,11 +84,39 @@ class JobQueue:
         with self.lock:
             out=[]
             candidate=copy.deepcopy(self.jobs)
+            # A monotonic per-product rank is separate from the legacy
+            # ``variant`` field.  Multi-script mode intentionally enqueues
+            # count=1/variant=0; this rank still gives each batch a different
+            # deterministic opening allocation and survives service restarts.
+            prior=[]
+            for old in self.jobs.values():
+                if old.get('product_id')!=pid: continue
+                inp=old.get('input') or {}
+                if inp.get('kind')=='render':
+                    try: prior.append(int(inp.get('selection_rank', old.get('selection_rank', 0))))
+                    except (TypeError,ValueError): pass
+            rank_base=(max(prior)+1) if prior else 0
+            prior_context=[]
+            for old in self.jobs.values():
+                if old.get('product_id')==pid:
+                    ctx=(old.get('input') or {}).get('selection_context')
+                    if isinstance(ctx,dict):prior_context.append((ctx.get('allocation_seq'),ctx.get('mapping_sha256')))
+            history_sha=hashlib.sha256(json.dumps(prior_context[-64:],sort_keys=True,separators=(',',':')).encode()).hexdigest()
             try:
                 for variant in range(count):
                     i=uuid.uuid4().hex; snap=copy.deepcopy(input_snapshot);snap['variant']=variant;snap['batch_count']=count
+                    if snap.get('kind')=='render':
+                        seq=rank_base+variant;snap['selection_rank']=seq
+                        prior_render=[old for old in candidate.values() if old.get('product_id')==pid and (old.get('input') or {}).get('kind')=='render']
+                        snap['mapping']=diversity_rank(snap.get('mapping') or [],seq,recent_openings(prior_render))
+                        snap['mapping_sha256']=hashlib.sha256(json.dumps(snap['mapping'],ensure_ascii=False,sort_keys=True,separators=(',',':')).encode('utf8')).hexdigest()
+                        mapping_sha=str(snap.get('mapping_sha256') or '')
+                        seed=hashlib.sha256(f'six-diversity-v1|{pid}|{seq}|{mapping_sha}|{history_sha}'.encode()).hexdigest()
+                        reserved=prefix_plan(snap.get('mapping') or [],snap.get('lines') or [],snap.get('settings') or {})
+                        snap['allocation_seq']=seq
+                        snap['selection_context']={'schema':'six-diversity-v1','allocation_seq':seq,'batch_id':hashlib.sha256(f'{pid}|{rank_base}|{count}|{mapping_sha}'.encode()).hexdigest()[:16],'prefix_seconds':15,'mapping_sha256':mapping_sha,'history_sha256':history_sha,'seed':seed,'reserved_prefix':reserved,'purpose':'cross-batch opening reservation'}
                     d=self.root/i;d.mkdir(exist_ok=False);created.append((d,(d.stat().st_dev,d.stat().st_ino)));raw=json.dumps(snap,ensure_ascii=False,sort_keys=True,allow_nan=False).encode('utf8');(d/'input.json').write_bytes(raw)
-                    j={'id':i,'product_id':pid,'input_sha256':hashlib.sha256(raw).hexdigest(),'input':snap,'variant':variant,'status':'queued','stage':'queued','progress':0,'created_at':time.time(),'error':None,'revision':0}
+                    j={'id':i,'product_id':pid,'input_sha256':hashlib.sha256(raw).hexdigest(),'input':snap,'variant':variant,'selection_rank':snap.get('selection_rank',variant),'status':'queued','stage':'queued','progress':0,'created_at':time.time(),'error':None,'revision':0}
                     candidate[i]=j;out.append(copy.deepcopy(j))
                 self._save(candidate,condition)
                 return out[0] if count==1 else out

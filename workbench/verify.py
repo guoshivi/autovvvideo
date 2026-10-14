@@ -5,6 +5,7 @@ from fractions import Fraction
 import numpy as np
 from .media import correlate_pcm,sha256
 from .process import run_owned
+from .audio_qa import mixed_voice_gate,local_gain_gate
 class VerificationFailure(ValueError):
     def __init__(self,stage,check,measured,required,index=None):
         self.details={'stage':stage,'check':check,'sentence_index':index,'measured':measured,'required':required}
@@ -125,8 +126,19 @@ def verify_media(path,ffmpeg,ffprobe,timeline,expected=None,voice_wavs=None,mode
         voice_correlations=[]
         for i,(wav_path,t) in enumerate(zip(voice_wavs,timeline)):
             x=voice_samples[i];start=round(float(t['start'])*24000);got=correlate_pcm(x,isolated,start);got['index']=i;voice_correlations.append(got)
-            if got.get('ok') is not True:
+            mixed_gate=None
+            if mode=='mixed':
+                mixed_gate=mixed_voice_gate(x,isolated,start,known_music,got)
+                got['mixed_gate']=mixed_gate
+            if mode=='voice' and got.get('ok') is True:
+                gain_gate=local_gain_gate(x,isolated,start,got.get('offset_samples') or 0)
+                got['local_gain']=gain_gate
+            else:gain_gate=None
+            accepted=(mixed_gate.get('ok') is True if mode=='mixed' else got.get('ok') is True and gain_gate is not None and gain_gate.get('ok') is True)
+            if not accepted:
                 metric={'whole':got.get('whole'),'head':got.get('head'),'tail':got.get('tail'),'min_block':min((b['correlation'] for b in got.get('non_silent_blocks',[])),default=None),'rms_ratio':got.get('rms_ratio'),'offset_samples':got.get('offset_samples')}
+                if mixed_gate:metric['mixed_gate']=mixed_gate
+                if gain_gate:metric['local_gain']=gain_gate
                 raise VerificationFailure('verify','PCM correlation',metric,'original WAV whole>=.97 head/tail>=.95 each block>=.90 offset<=4ms rms .9..1.1',i)
         checks['voice_pcm']=True
         for i,(x,t) in enumerate(zip(voice_samples,timeline)):

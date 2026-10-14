@@ -1,0 +1,3 @@
+# Optional isolated filters environment.  Keep separate from Torch/Qwen/Vox.
+numpy==2.1.3
+opencv-python-headless==4.10.0.84

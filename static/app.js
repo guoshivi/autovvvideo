@@ -1,5 +1,5 @@
 /* 视频工作台 V2 前端（v9：AI 文案 / 语速 / 目标时长 / 常用稿 / 一键出片 / 封面片头尾 / 结果卡片 / 镜头去重） */
-const state={products:[],jobs:[],product:null,draft:'',retrieval:[],roots:[],picker:null,batchMode:'single',batchCount:1,bgm:null,cover:null,intro:null,outro:null,indexReady:false,indexInfo:null,aiOpen:false,aiBusy:false,aiHasKey:false,aiOut:null,lastJobsSig:'',lastIndexSample:null,settingsTimer:null,queuePage:1,previewBusy:false,previewAudio:null};
+const state={products:[],jobs:[],product:null,draft:'',retrieval:[],roots:[],picker:null,batchMode:'single',batchCount:1,bgm:null,cover:null,intro:null,outro:null,indexReady:false,indexInfo:null,timing:null,aiOpen:false,aiBusy:false,aiHasKey:false,aiOut:null,lastJobsSig:'',lastIndexSample:null,settingsTimer:null,queuePage:1,previewBusy:false,previewAudio:null,cleanUndo:null};
 const $=s=>document.querySelector(s),esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 async function api(url,opt){opt=opt||{};const ctl=new AbortController();const tid=setTimeout(()=>ctl.abort(),opt.timeoutMs||30000);let r;
 try{r=await fetch(url,Object.assign({},opt,{signal:ctl.signal}))}catch(e){clearTimeout(tid);throw Error(e.name==='AbortError'?'请求超时，请再试一次':e.message)}
@@ -33,7 +33,7 @@ async function load(){try{setErr('');syncDraft();
   state.needReload=false;
 }catch(e){state.needReload=true;setErr('服务暂不可用：'+e.message+'（稍等片刻会自动恢复）')}}
 /* ---------- 设置：读取/保存（记住上次选择） ---------- */
-const DEFAULTS={voice:true,subtitles:true,speaker:'Serena',voice_engine:'qwen',vox_voice:'natural_female',speed:1.0,target_seconds:0,shot_reuse:1,subtitle_size:54,subtitle_bottom:380,subtitle_border:3,dedup:'off',bgm:false,bgm_path:'',bgm_volume:0.2,cover:null,intro:null,outro:null};
+const DEFAULTS={voice:true,subtitles:true,speaker:'Serena',voice_engine:'qwen',vox_voice:'natural_female',speed:1.0,target_seconds:0,shot_reuse:1,subtitle_size:54,subtitle_bottom:380,subtitle_border:3,dedup:'off',beauty:false,beauty_strength:0.25,visual_filter:'original',visual_filter_strength:0.35,bgm:false,bgm_path:'',bgm_volume:0.2,cover:null,intro:null,outro:null};
 function productSettings(){return Object.assign({},DEFAULTS,state.product&&state.product.settings||{})}
 function hydrateSettings(){if(state.settingsTimer)return;
   const s=productSettings();
@@ -51,6 +51,8 @@ function collectSettings(){const s=productSettings();
     shot_reuse:$('#shotReuse')?parseInt($('#shotReuse').value,10):s.shot_reuse,
     bgm:!!state.bgm,bgm_path:state.bgm?state.bgm.path:'',bgm_volume:$('#bgmVol')?Math.max(0,Math.min(1,(Number($('#bgmVol').value)||0)/100)):s.bgm_volume,
     dedup:$('#dedup')?$('#dedup').value:s.dedup,
+    beauty:$('#beauty')?$('#beauty').checked:!!s.beauty,beauty_strength:$('#beautyStrength')?num($('#beautyStrength').value):Number(s.beauty_strength??.25),
+    visual_filter:$('#visualFilter')?$('#visualFilter').value:(s.visual_filter||'original'),visual_filter_strength:$('#visualFilterStrength')?num($('#visualFilterStrength').value):Number(s.visual_filter_strength??.35),
     cover:cover,intro:card(state.intro),outro:card(state.outro)}}
 function persistSettings(){if(!state.product)return;clearTimeout(state.settingsTimer);
   state.settingsTimer=setTimeout(async()=>{state.settingsTimer=null;try{const p=await api(`/api/products/${state.product.id}/settings`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({settings:collectSettings()})});
@@ -68,6 +70,7 @@ async function refreshIdxState(){if(!state.product)return;const pid=state.produc
   try{const st=await api(`/api/products/${pid}/index`,{timeoutMs:180000});
     if(!state.product||state.product.id!==pid)return;
     state.indexInfo=st;state.indexReady=!!st.ready;
+    if(state.indexReady)refreshTiming();
     const t=$('#idxStatus');if(t)t.textContent=idxText(st);
     const run=indexRunningJob(st);const pausedJob=indexPausedJob(st);const b=$('#btnIndex');
     if(b){if(run){b.disabled=true;b.textContent='正在建索引…'}else if(pausedJob){b.disabled=true;b.textContent='索引已暂停（见任务队列）'}else{b.disabled=!state.product.source;b.textContent=st.ready?'更新索引':'开始建索引'}}
@@ -88,9 +91,13 @@ function estSeconds(){const ta=$('#copy');const lines=splitLines(ta?ta.value:'')
   return Math.round(total*10)/10}
 function renderEstimate(){const chip=$('#estChip'),warn=$('#warnChip');if(!chip)return;
   const est=estSeconds();const target=parseInt(($('#target')||{}).value||'0',10)||0;
-  chip.textContent=est?`预计成片约 ${fmtSec(est)}`:'预计成片约 -- 秒';
+  const measured=state.timing&&state.timing.estimate;const shown=measured&&Number.isFinite(measured.seconds)?measured.seconds:est;
+  chip.textContent=shown?`预计成片约 ${fmtSec(shown)}${measured?(measured.calibrated?'（历史收据校准）':'（语速估计）'):''}`:'预计成片约 -- 秒';
   chip.className='chip'+(target&&est>target?' over':'');
-  if(warn){if(target&&est){warn.textContent=est>target?`超出目标 ${target} 秒`:`在目标 ${target} 秒内`;warn.className='chip '+(est>target?'warn':'okchip')}else{warn.textContent='';warn.className='chip'}}}
+  if(warn){if(measured&&measured.warning){warn.textContent=measured.warning;warn.className='chip warn'}else if(target&&shown){warn.textContent=shown>target?`超出目标 ${target} 秒`:`在目标 ${target} 秒内`;warn.className='chip '+(shown>target?'warn':'okchip')}else{warn.textContent='';warn.className='chip'}}}
+let timingVersion=0,lastTimingKey='';
+function timingChanged(){timingVersion++;state.timing=null;renderEstimate();clearTimeout(state.timingTimer);state.timingTimer=setTimeout(refreshTiming,900)}
+async function refreshTiming(){if(!state.product||!state.indexReady)return;const pid=state.product.id,text=($('#copy')||{}).value||state.draft||'',settings=collectSettings();const key=JSON.stringify([pid,text,settings]);if(key===lastTimingKey&&state.timing)return;const version=++timingVersion;try{const result=await api(`/api/products/${pid}/timing`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text,settings}),timeoutMs:60000});if(version!==timingVersion||!state.product||state.product.id!==pid||JSON.stringify([pid,($('#copy')||{}).value||state.draft||'',collectSettings()])!==key)return;state.timing=result;lastTimingKey=key;renderEstimate()}catch(e){if(version===timingVersion){state.timing=null;renderEstimate()}}}
 function renderScript(){const el=$('#secScript');if(!el)return;
   if(!state.product){el.innerHTML='<h3><span class="num">2</span>脚本生产</h3><p class="muted">选择商品后可用。</p>';return}
   const s=productSettings();const engine=s.voice_engine||'qwen';const text=state.draft!==''?state.draft:(state.product.copy?.text||'');
@@ -100,18 +107,20 @@ function renderScript(){const el=$('#secScript');if(!el)return;
   el.innerHTML=`<h3><span class="num">2</span>脚本生产 <small class="muted">${esc(state.product.name)}</small></h3>
 <label for="copy">口播文案 <span class="muted">（一行一句；多条脚本之间用单独一行 --- 分隔）</span></label>
 <textarea id="copy" rows="8" oninput="onCopyInput()">${esc(text)}</textarea>
-<div class="ai-row"><button class="secondary" id="btnAIGen" onclick="aiTogglePanel()">✨ AI 生成</button><button class="secondary" id="btnAIPolish" onclick="aiRun('polish')">润色</button><button class="secondary" id="btnAIColloq" onclick="aiRun('colloquial')">改口语化</button><button class="secondary" id="btnAISplit" onclick="aiRun('split')">AI 断句</button><button class="secondary" id="btnAIPack" onclick="aiRun('pack')">投放包</button><button class="secondary" id="btnAIAudit" onclick="aiRun('audit')">合规体检</button><button class="secondary" id="btnAIFit" onclick="aiRun('fit')">按时长优化</button><span id="aiStatus" class="muted"></span></div>
+<div class="ai-row"><button class="secondary" id="btnAIGen" onclick="aiTogglePanel()">✨ AI 生成</button><button class="secondary" id="btnAIPolish" onclick="aiRun('polish')">润色</button><button class="secondary" id="btnAIColloq" onclick="aiRun('colloquial')">改口语化</button><button class="secondary" id="btnAISplit" onclick="aiRun('split')">AI 断句</button><button class="secondary" id="btnAIFission" onclick="aiRun('variants')">AI 裂变 N 稿</button><button class="secondary" id="btnAIClean" onclick="cleanCopyLocal()">清理标点</button><button class="secondary" id="btnAIUndo" onclick="undoClean()" style="${state.cleanUndo===null?'display:none':''}">撤销清理</button><button class="secondary" id="btnAIPack" onclick="aiRun('pack')">投放包</button><button class="secondary" id="btnAIAudit" onclick="aiRun('audit')">合规体检</button><button class="secondary" id="btnAIFit" onclick="aiRun('fit')">按时长优化</button><span id="aiStatus" class="muted"></span></div>
 <div id="aiOut" class="ai-out" hidden><div class="row"><b id="aiOutTitle"></b><span class="row"><button class="secondary small" onclick="copyAiOut()">复制全部</button><button class="secondary small" onclick="closeAiOut()">收起</button></span></div><pre id="aiOutBody"></pre></div>
 <div id="aiPanel" class="ai-panel" ${state.aiOpen?'':'hidden'}><div class="advgrid"><label>产品名 <input id="aiName" placeholder="例如：厨房收纳架" value="${esc(state.product.name)}"></label><label class="wide">卖点 <textarea id="aiPoints" rows="2" placeholder="一行一个，例如：分格收纳、可拆洗、适合厨房台面"></textarea></label><label>人群 <input id="aiAudience" placeholder="例如：30-50 岁上班族"></label><label>风格 <input id="aiStyle" placeholder="例如：亲切、生活化"></label></div><div class="row"><button class="primary" onclick="aiRun('generate')">开始生成</button><button class="secondary" onclick="aiTogglePanel()">收起</button></div><div class="ai-krow"><details class="adv" open><summary>AI 接口设置（填一次就记住）</summary><div class="advgrid"><label>接口地址 <input id="aiBaseUrl" placeholder="https://api.deepseek.com"></label><label>密钥 <span class="row"><input id="aiKey" type="password" placeholder="${state.aiHasKey?'已配置（留空不改动）':'未配置'}"><button class="secondary small" onclick="saveAiSettings()">保存</button><button class="secondary small" id="aiKeyClear" onclick="clearAiKey()" style="${state.aiHasKey?'':'display:none'}">清除密钥</button></span></label><span class="muted wide">密钥只保存在这台 Win 机上，不会显示回页面；留空则保持原密钥不变。使用 AI 时，文案和产品信息会发送给所填写的服务商。</span></div><details><summary>高级：模型名称（可选）</summary><label>模型 <input id="aiModel" placeholder="服务商提供的模型 ID；留空保持原值"></label></details></details></div></div>
 <div class="settings-row"><label><input id="voice" type="checkbox" ${s.voice?'checked':''} onchange="onSettingChange()"> 语音</label><label><input id="subs" type="checkbox" ${s.subtitles?'checked':''} onchange="onSettingChange()"> 字幕</label><label class="voice-engine-label">配音 <select id="voiceEngine" onchange="onEngineChange()"><option value="qwen" ${engine==='qwen'?'selected':''}>Qwen（原配音）</option><option value="vox" ${engine==='vox'?'selected':''}>Vox（新配音·试用）</option></select></label><label class="slider-label">语速 <input id="speed" type="range" min="0.85" max="1.5" step="0.05" value="${Number(s.speed)||1}" oninput="onSpeedInput()"> <b id="speedVal">${(Number(s.speed)||1).toFixed(2).replace(/0$/,'').replace(/\.$/,'.0')}×</b></label><label>目标时长 <input id="target" type="number" min="0" max="3600" step="1" value="${Number(s.target_seconds)||''}" placeholder="不设" oninput="renderEstimate();persistSettings()"> 秒</label></div>
 <div class="settings-row voice-row">
-<label class="engine-control qwen-control" style="${engine==='qwen'?'':'display:none'}">Qwen 说话人 <select id="speaker" onchange="persistSettings()"><option value="Serena" ${s.speaker==='Serena'?'selected':''}>Serena（自然女声）</option><option value="Vivian" ${s.speaker==='Vivian'?'selected':''}>Vivian（清晰女声）</option><option value="Uncle_Fu" ${s.speaker==='Uncle_Fu'?'selected':''}>Uncle Fu（成熟男声）</option></select></label>
-<label class="engine-control vox-control" style="${engine==='vox'?'':'display:none'}">Vox 声音 <select id="voxVoice" onchange="persistSettings()"><option value="natural_female" ${s.vox_voice==='natural_female'?'selected':''}>自然分享女声</option><option value="bright_female" ${s.vox_voice==='bright_female'?'selected':''}>清晰活力女声（不喊叫）</option><option value="calm_male" ${s.vox_voice==='calm_male'?'selected':''}>沉稳成熟男声</option><option value="story_female" ${s.vox_voice==='story_female'?'selected':''}>温暖叙事女声</option></select></label><button class="secondary small" id="btnVoicePreview" onclick="previewVoice()" ${state.previewBusy?'disabled':''}>${state.previewBusy?'正在试听…':'试听当前配音'}</button><span id="voicePreviewStatus" class="muted"></span><audio id="voicePreviewAudio" controls preload="none" style="${state.previewAudio?'':'display:none'}" src="${state.previewAudio?esc(state.previewAudio):''}"></audio>
+<label class="engine-control qwen-control" style="${engine==='qwen'?'':'display:none'}">Qwen 说话人 <select id="speaker" onchange="onSettingChange()"><option value="Serena" ${s.speaker==='Serena'?'selected':''}>Serena（自然女声）</option><option value="Vivian" ${s.speaker==='Vivian'?'selected':''}>Vivian（清晰女声）</option><option value="Uncle_Fu" ${s.speaker==='Uncle_Fu'?'selected':''}>Uncle Fu（成熟男声）</option></select></label>
+<label class="engine-control vox-control" style="${engine==='vox'?'':'display:none'}">Vox 声音 <select id="voxVoice" onchange="onSettingChange()"><option value="natural_female" ${s.vox_voice==='natural_female'?'selected':''}>自然分享女声</option><option value="bright_female" ${s.vox_voice==='bright_female'?'selected':''}>清晰活力女声（不喊叫）</option><option value="calm_male" ${s.vox_voice==='calm_male'?'selected':''}>沉稳成熟男声</option><option value="story_female" ${s.vox_voice==='story_female'?'selected':''}>温暖叙事女声</option></select></label><button class="secondary small" id="btnVoicePreview" onclick="previewVoice()" ${state.previewBusy?'disabled':''}>${state.previewBusy?'正在试听…':'试听当前配音'}</button><span id="voicePreviewStatus" class="muted"></span><audio id="voicePreviewAudio" controls preload="none" style="${state.previewAudio?'':'display:none'}" src="${state.previewAudio?esc(state.previewAudio):''}"></audio>
 </div>
 <div class="estline"><span id="estChip" class="chip">预计成片约 -- 秒</span><span id="warnChip" class="chip"></span></div>
 <div class="row go-row"><button class="primary big" id="btnGo" onclick="makeJobs()" ${state.indexReady?'':'disabled'}>开始出片</button><span id="goHint" class="muted">${state.indexReady?'':'先在①建立索引，就能一键出片'}</span></div>
 <details class="adv"><summary>高级设置（去重 / 镜头 / BGM / 字幕样式 / 封面 / 片头片尾）</summary><div class="advgrid">
-<label>去重 <select id="dedup" onchange="persistSettings()"><option value="off" ${s.dedup==='off'?'selected':''}>关闭</option><option value="light" ${s.dedup==='light'?'selected':''}>轻度</option><option value="double" ${s.dedup==='double'?'selected':''}>双重</option></select></label>
+<label>去重 <select id="dedup" onchange="persistSettings()"><option value="off" ${s.dedup==='off'?'selected':''}>关闭</option><option value="light" ${s.dedup==='light'?'selected':''}>轻度</option><option value="double" ${s.dedup==='double'?'selected':''}>双重（保持文字方向）</option></select></label>
+<label>人物轻美颜 <span class="row"><input id="beauty" type="checkbox" ${s.beauty?'checked':''} onchange="persistSettings()"><input id="beautyStrength" type="range" min="0" max="1" step="0.05" value="${Number(s.beauty_strength??.25)}" oninput="persistSettings()"></span></label>
+<label>画面滤镜 <span class="row"><select id="visualFilter" onchange="persistSettings()"><option value="original" ${s.visual_filter==='original'?'selected':''}>原画</option><option value="clear" ${s.visual_filter==='clear'?'selected':''}>清透</option><option value="warm" ${s.visual_filter==='warm'?'selected':''}>暖色</option><option value="cinema" ${s.visual_filter==='cinema'?'selected':''}>电影</option></select><input id="visualFilterStrength" type="range" min="0" max="1" step="0.05" value="${Number(s.visual_filter_strength??.35)}" oninput="persistSettings()"></span></label>
 <label>同镜头重复上限 <select id="shotReuse" onchange="persistSettings()"><option value="0" ${Number(s.shot_reuse)===0?'selected':''}>不限</option><option value="1" ${Number(s.shot_reuse)===1?'selected':''}>1 次</option><option value="2" ${Number(s.shot_reuse)===2?'selected':''}>2 次</option><option value="3" ${Number(s.shot_reuse)===3?'selected':''}>3 次</option></select></label>
 <label>BGM <span class="row"><button class="secondary small" id="bgmBtn" onclick="openPicker('bgm')">${state.bgm?('BGM：'+esc(state.bgm.name||'已选')):'选择 BGM 文件'}</button><button class="secondary small" id="bgmClear" onclick="clearBgm()" style="${state.bgm?'':'display:none'}">清除</button></span></label>
 <label>BGM 音量 <span class="row"><input id="bgmVol" type="range" min="0" max="100" step="5" value="${Math.round(Number(s.bgm_volume??0.2)*100)}" oninput="onBgmVol()"> <b id="bgmVolVal">${Math.round(Number(s.bgm_volume??0.2)*100)}%</b></span></label>
@@ -129,9 +138,9 @@ function renderScript(){const el=$('#secScript');if(!el)return;
 <div id="retrieval" class="retrieval">${state.retrieval.map(x=>`<div><b>第${x.sentence_id+1}句</b> ${esc(x.line)}<br><small>${x.candidates.map(c=>esc(c.path.split(/[\\/]/).pop())+' '+Number(c.score).toFixed(3)).join(' · ')}</small></div>`).join('')}</div>
 </details>`;
   renderBatchBox();renderCopyList();renderEstimate()}
-function onSettingChange(){persistSettings();renderEstimate()}
-function onSpeedInput(){const v=Number(($('#speed')||{}).value||1);const b=$('#speedVal');if(b)b.textContent=(v).toFixed(2).replace(/0$/,'').replace(/\.$/,'.0')+'×';renderEstimate();persistSettings()}
-function onEngineChange(){syncDraft();state.product.settings=collectSettings();state.previewAudio=null;persistSettings();renderScript()}
+function onSettingChange(){timingChanged();persistSettings()}
+function onSpeedInput(){const v=Number(($('#speed')||{}).value||1);const b=$('#speedVal');if(b)b.textContent=(v).toFixed(2).replace(/0$/,'').replace(/\.$/,'.0')+'×';timingChanged();persistSettings()}
+function onEngineChange(){syncDraft();state.product.settings=collectSettings();state.previewAudio=null;timingChanged();persistSettings();renderScript()}
 function voicePreviewText(){let text=String(($('#copy')||{}).value||'').trim();if(!text)text='这是当前配音的试听片段，确认声音后再开始出片。';text=text.split(/\n+/).map(x=>x.trim()).filter(Boolean)[0]||text;return [...text].slice(0,120).join('')}
 function voicePreviewKey(s,text){return JSON.stringify([state.product?.id||null,s.voice_engine||'qwen',s.speaker,s.vox_voice,Number(s.speed)||1,text])}
 async function previewVoice(){
@@ -186,27 +195,34 @@ async function clearAiKey(){const ok=await confirmDialog('清除已保存的 AI 
     state.aiHasKey=!!d.has_key;const c=$('#aiKeyClear');if(c)c.style.display=state.aiHasKey?'':'none';
     const kk=$('#aiKey');if(kk)kk.placeholder=state.aiHasKey?'已配置（留空不改动）':'未配置';toast('已清除密钥')}catch(e){toast(e.message,'warn')}}
 function aiBusySet(busy,msg){state.aiBusy=busy;const st=$('#aiStatus');if(st)st.textContent=busy?(msg||'正在生成…'):'';
-  ['btnAIGen','btnAIPolish','btnAIColloq','btnAISplit','btnAIPack','btnAIAudit','btnAIFit'].forEach(id=>{const b=$('#'+id);if(b)b.disabled=busy})}
+  ['btnAIGen','btnAIPolish','btnAIColloq','btnAISplit','btnAIFission','btnAIClean','btnAIPack','btnAIAudit','btnAIFit'].forEach(id=>{const b=$('#'+id);if(b)b.disabled=busy})}
 function renderAiOut(){const box=$('#aiOut');if(!box)return;const o=state.aiOut;if(!o){box.hidden=true;return}
   box.hidden=false;const t=$('#aiOutTitle');if(t)t.textContent=o.title;const b=$('#aiOutBody');if(b)b.textContent=o.text}
 function closeAiOut(){state.aiOut=null;renderAiOut()}
+function cleanCopyLocal(){const ta=$('#copy');if(!ta||!ta.value.trim())return toast('编辑框还是空的','warn');
+  const src=ta.value;let out=src.replace(/[\u{1F000}-\u{1FAFF}\u2600-\u27BF]/gu,'').replace(/([，。！？!?；;：:,])\1+/g,'$1');
+  out=out.split(/\r?\n/).flatMap(line=>{if(/^\s*-{3,}\s*$/.test(line))return ['---'];let s=line.trim();if(!s)return [];return s.split(/(?<=[。！？!?；;])\s*/).map(x=>x.replace(/[。！？!?；;：:，,、]+$/,'').trim()).filter(Boolean)}).join('\n');
+  if(out===src)return toast('没有发现需要清理的标点');state.cleanUndo=src;ta.value=out;syncDraft();renderScript();toast('已清理标点，可点撤销恢复原稿')}
+function undoClean(){if(state.cleanUndo===null)return;const ta=$('#copy');if(ta){ta.value=state.cleanUndo;syncDraft();state.cleanUndo=null;renderScript();toast('已撤销清理')}}
 async function copyAiOut(){if(!state.aiOut)return;const text=state.aiOut.text;
   try{await navigator.clipboard.writeText(text);toast('已复制')}catch(e){
     try{const ta=document.createElement('textarea');ta.value=text;document.body.appendChild(ta);ta.select();document.execCommand('copy');ta.remove();toast('已复制')}catch(e2){toast('复制失败，请手动选择文字复制','warn')}}}
 async function aiRun(mode){if(!state.product||state.aiBusy)return;const ta=$('#copy');if(!ta)return;
-  const label={generate:'生成',polish:'润色',colloquial:'改口语化',split:'断句',pack:'投放包',audit:'合规体检',fit:'按时长改写'}[mode]||mode;
+  const label={generate:'生成',polish:'润色',colloquial:'改口语化',split:'断句',variants:'裂变',pack:'投放包',audit:'合规体检',fit:'按时长改写'}[mode]||mode;
   let body={mode:mode};
   if(mode==='generate'){body.brief={name:($('#aiName')||{}).value||'',points:($('#aiPoints')||{}).value||'',audience:($('#aiAudience')||{}).value||'',style:($('#aiStyle')||{}).value||''};
     if(!body.brief.name.trim()&&!body.brief.points.trim())return toast('先填一下产品名或卖点','warn');
     if(ta.value.trim()){const ok=await confirmDialog('会用生成结果替换编辑框里的文案，继续？');if(!ok)return}}
   else{if(!ta.value.trim())return toast('先在编辑框里写好文案，再点「'+label+'」','warn');
     body.text=ta.value;body.brief={name:($('#aiName')||{}).value||state.product.name||''}}
-  if(mode==='fit'){const tv=parseInt(($('#target')||{}).value||'0',10)||0;if(tv<3||tv>600)return toast('先在设置行「目标时长」里填 3–600 秒，再点「按时长优化」','warn');body.brief.target_seconds=tv}
+  if(mode==='fit'){const tv=parseInt(($('#target')||{}).value||'0',10)||0;if(tv<3||tv>600)return toast('先在设置行「目标时长」里填 3–600 秒，再点「按时长优化」','warn');if(!state.indexReady)return toast('按时长优化需要先建立索引','warn');body.brief.target_seconds=tv;body.settings=collectSettings()}
+  if(mode==='variants'){const raw=prompt('需要几份文案？','3');if(raw===null)return;const n=Number(raw);if(!Number.isInteger(n)||n<2||n>20)return toast('裂变数量需为 2–20 的整数','warn');body.brief.count=n}
   const provider=await api('/api/ai-settings');
   if(state.aiConsent!==provider.base_url){const ok=await confirmDialog('使用 AI 会把本次文案、产品名和卖点发送给你填写的服务商（'+provider.base_url+'）。确认后继续。');if(!ok)return;state.aiConsent=provider.base_url}
   aiBusySet(true,'正在'+label+'（约 10 秒）…');
   try{const r=await api(`/api/products/${state.product.id}/ai-copy`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),timeoutMs:120000});
     if(mode==='pack'||mode==='audit'){state.aiOut={title:mode==='pack'?'投放包（标题 / 标签 / 置顶评论）':'合规体检结果',text:r.text};renderAiOut();toast(mode==='pack'?'投放包已生成，可直接复制':'体检完成，结果已显示')}
+    else if(mode==='variants'){if(!Array.isArray(r.variants)||!r.variants.length)throw Error('AI 没有返回可用裂变稿');const count=`${r.produced??r.variants.length}/${r.requested??r.variants.length}`;state.aiOut={title:`AI 裂变结果（${count} 份${r.partial?'，数量不足':''}）`,text:r.variants.map((x,i)=>`稿${i+1}\n${x}`).join('\n\n')+(r.partial?`\n\n数量不足：${r.reason||'有效稿件不足'}`:'')};renderAiOut();const ok=await confirmDialog(`已得到 ${count} 份稿${r.partial?`，${r.reason||'数量不足'}`:''}。替换编辑框并用 --- 分隔？`);if(ok){ta.value=r.variants.join('\n---\n');syncDraft();renderBatchBox();renderEstimate();toast('裂变稿已放入编辑框，可继续修改')}}
     else if(mode==='split'||mode==='fit'){ta.value=r.text;syncDraft();renderEstimate();toast(mode==='fit'?'已按目标时长改写，可以手动微调':'已按口播节奏重新断句，可以手动微调')}
     else{ta.value=r.text;syncDraft();renderEstimate();toast('已填入编辑框，可以手动修改')}}
   catch(e){toast(e.message,'warn')}
@@ -289,7 +305,7 @@ async function indexNow(){const btn=$('#btnIndex'),st=$('#idxStatus');
 /* ---------- 脚本与批量 ---------- */
 function parseBatchScripts(t){return String(t||'').split(/\n\s*-{3,}\s*\n/).map(s=>s.trim()).filter(Boolean)}
 function setBatchMode(m){state.batchMode=m;renderBatchBox()}
-function onCopyInput(){if(state.batchMode==='multi')renderBatchBox();renderEstimate()}
+function onCopyInput(){if(state.batchMode==='multi')renderBatchBox();timingChanged()}
 function fmtMinutes(min){if(min<60)return min+' 分钟';const h=Math.floor(min/60),m=min%60;return m?`${h} 小时 ${m} 分钟`:`${h} 小时`}
 function renderBatchBox(){const ex=$('#batchExtra'),info=$('#batchInfo');if(!ex||!info)return;
   if(state.batchMode==='single'){ex.innerHTML=`数量 <input id="batchCount" type="number" min="1" max="500" value="${state.batchCount||1}" oninput="onBatchCount()"> <span class="muted">同一条脚本生成几个版</span>`;info.textContent='';onBatchCount()}
