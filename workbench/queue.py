@@ -1,10 +1,14 @@
 import json, threading, uuid, time, copy, os, hashlib
 from pathlib import Path
-from .fs_authority import commit_scope, assert_mutation_allowed
+from .fs_authority import commit_scope, assert_mutation_allowed, replace_with_retry
 class JobQueue:
     def __init__(self,path):
         self.path=Path(path);self.path.parent.mkdir(parents=True,exist_ok=True);self.root=self.path.parent/'jobs';self.root.mkdir(exist_ok=True);self.lock=threading.RLock();self.jobs=self._load()
         for j in self.jobs.values():
+            # A job that was running when the service died cannot be trusted to be
+            # half-done, so it needs human review.  A *paused* job is deliberate:
+            # its worker is gone but nothing was in flight, so it stays paused and
+            # the queue's 继续 button hands it back to the worker.
             if j['status']=='running':j.update(status='interrupted',stage='restart',error={'stage':'restart','check':'interrupted','message':'服务重启，需人工复核；未自动重做'})
         self._save()
     def _load(self):
@@ -29,7 +33,11 @@ class JobQueue:
                 if before_replace is not None and before_replace(value) is False:
                     raise ValueError('queue final commit condition rejected')
                 self._validate_input_files(value)
-                os.replace(t,self.path);published=True
+                # Re-checked immediately before every actual replace attempt,
+                # including retries after a Windows sharing violation: a final
+                # condition that drifted to False must not be published behind.
+                replace_with_retry(t,self.path,guard=(None if before_replace is None else (lambda:(before_replace(value) is not False))))
+                published=True
                 if before_replace is not None and before_replace(value) is False:
                     raise IOError('queue replace occurred but final condition failed')
                 self._validate_input_files(value)
@@ -45,7 +53,7 @@ class JobQueue:
                 try:
                     if old_raw is None:self.path.unlink(missing_ok=True)
                     else:
-                        rb=self.path.with_name(self.path.name+'.reconcile-'+uuid.uuid4().hex);rb.write_bytes(old_raw);os.replace(rb,self.path)
+                        rb=self.path.with_name(self.path.name+'.reconcile-'+uuid.uuid4().hex);rb.write_bytes(old_raw);replace_with_retry(rb,self.path)
                     self.jobs=self._load()
                     self._restore_input_files(input_before)
                 except Exception:pass
@@ -100,7 +108,7 @@ class JobQueue:
             j=self.jobs[i]
             forbidden={'input','input_sha256','product_id','variant','id','revision'}
             if forbidden.intersection(kw): raise ValueError('immutable job fields')
-            allowed={'status','stage','progress','indexed','total','reused','index_id','error','cancel_requested','output','artifact','report','output_folder'}
+            allowed={'status','stage','progress','indexed','total','reused','skipped','skipped_files','index_id','error','cancel_requested','pause_requested','output','artifact','report','output_folder'}
             unknown=set(kw)-allowed
             if unknown: raise ValueError(f'unknown mutable job fields: {sorted(unknown)}')
             if kw.get('status')=='done' and condition is None:raise ValueError('done requires trusted commit condition')
@@ -112,10 +120,58 @@ class JobQueue:
         with self.lock:
             j=self.jobs.get(i)
             if not j or j['status'] in ('done','failed','cancelled','interrupted'):return False
-            j['cancel_requested']=True
-            if j['status']=='queued':j.update(status='cancelled',stage='cancelled')
-            candidate=copy.deepcopy(self.jobs);candidate[i]['cancel_requested']=True
-            if candidate[i]['status']=='queued':candidate[i].update(status='cancelled',stage='cancelled')
+            candidate=copy.deepcopy(self.jobs);c=candidate[i]
+            c['cancel_requested']=True
+            # a job that never started (or is parked paused) is cancelled
+            # outright; a live one stops at its next pause/cancel checkpoint and
+            # the worker then reports the terminal state.
+            if c['status'] in ('queued','paused'):c.update(status='cancelled',stage='cancelled')
+            self._save(candidate);return True
+    def pause(self,i):
+        """Ask a job to suspend at its next checkpoint.
+
+        `pause_requested` is the request.  For a job that has not started yet
+        there is no worker in flight, so `status='paused'` takes effect
+        immediately and `next()` will not pick it up.  A *running* job keeps
+        `running` until its worker acknowledges at a file/step boundary
+        (`pause_ack`) -- claiming 'paused' while work is still in flight was the
+        dishonest part.
+        """
+        assert_mutation_allowed()
+        with self.lock:
+            j=self.jobs.get(i)
+            if not j or j['status'] in ('done','failed','cancelled','interrupted'):return False
+            candidate=copy.deepcopy(self.jobs);c=candidate[i]
+            c['pause_requested']=True
+            if c['status']=='queued':c.update(status='paused',stage='paused')
+            self._save(candidate);return True
+    def pause_ack(self,i):
+        """Worker-side confirmation that it is parked at a boundary.
+
+        Only then does a running job become `paused`; the GPU lock/model can be
+        released at the same point.  Returns False when the job already moved on
+        (cancelled while the request was in flight).
+        """
+        assert_mutation_allowed()
+        with self.lock:
+            j=self.jobs.get(i)
+            if not j or j['status']!='running' or not j.get('pause_requested'):return False
+            candidate=copy.deepcopy(self.jobs);candidate[i].update(status='paused',stage='paused')
+            self._save(candidate);return True
+    def resume(self,i,live=False):
+        """Clear a pause.
+
+        live=True -- a worker is still inside this job and resumes in place, so
+        the status goes back to running and the worker restores its own stage.
+        live=False -- the worker is gone (the app restarted while paused), so the
+        job is handed back to the queue and picked up from the top."""
+        assert_mutation_allowed()
+        with self.lock:
+            j=self.jobs.get(i)
+            if not j or j['status']!='paused':return False
+            candidate=copy.deepcopy(self.jobs);c=candidate[i]
+            c['pause_requested']=False
+            c.update(status='running' if live else 'queued',stage='resuming' if live else 'queued')
             self._save(candidate);return True
     def next(self):
         assert_mutation_allowed()

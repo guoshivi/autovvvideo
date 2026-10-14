@@ -30,6 +30,25 @@ def _render_dest_name(product,job_input,job_id):
     t=_time.strftime('%m%d-%H%M%S')
     v=int(job_input.get('variant') or 0)
     return '_'.join([name]+([summary] if summary else [])+[f'{t}_v{v}'])
+_SKIP_CATEGORIES=(
+    ('index/probe','unreadable','无法解析（文件损坏或不完整）'),
+    ('index/window','slice_failed','切片失败（该片段的画面无法读取）'),
+)
+def public_skipped(rows):
+    """Public (API/UI-safe) view of the files a partial index had to skip.
+
+    The indexer's own records carry the full private path and the raw ffmpeg
+    diagnostics; neither may cross the product API boundary.  The public form
+    keeps only the basename and a short reason category, so the UI can say
+    "成功 X / 跳过 Y（原因）" without leaking local paths."""
+    out=[]
+    for r in rows or []:
+        if not isinstance(r,dict):continue
+        raw=str(r.get('reason') or '');code,label='unknown','读取失败'
+        for prefix,cat,cn in _SKIP_CATEGORIES:
+            if raw.startswith(prefix):code,label=cat,cn;break
+        out.append({'name':str(r.get('name') or ''),'reason':code,'reason_cn':label})
+    return out
 @contextmanager
 def gpu_guard(cfg):
     p=Path(cfg.gpu_lock_path)
@@ -63,6 +82,36 @@ def gpu_guard(cfg):
         try:yield
         finally:_unlock()
     finally:f.close()
+# A GPU only counts as busy when the existing conservative thresholds are met:
+# too much VRAM already in use, or utilization beyond idle.  The thresholds are
+# deliberately unchanged; what changed is that an nvidia-smi output that cannot
+# be parsed is now REJECTED (fail-closed) instead of being read as "idle".
+_GPU_BUSY_MEM_MB=1500      # used VRAM above which a job must wait
+_GPU_BUSY_UTIL=5           # utilization percent above which a job must wait
+def _parse_smi_rows(text):
+    """Parse `nvidia-smi --query-gpu=index,memory.used,utilization.gpu
+    --format=csv,noheader,nounits` into [(index,used_mb,util_pct), ...].
+
+    Fail-closed: a non-empty line that is not a well-formed row makes the whole
+    output untrusted, so None is returned and the caller must refuse the run.
+    Never return an empty list for non-empty garbage -- that used to read as
+    'GPU idle' and let a job through."""
+    rows=[]
+    for line in (text or '').strip().splitlines():
+        line=line.strip()
+        if not line:continue
+        f=[x.strip() for x in line.split(',')]
+        if len(f)!=3:return None
+        try:rows.append((int(f[0]),int(f[1]),int(f[2])))
+        except ValueError:return None
+    return rows or None
+def _gpu_busy_reason(rows):
+    """Return a human-readable reason when any GPU is genuinely busy, else None."""
+    for _,mem,util in rows:
+        if mem>_GPU_BUSY_MEM_MB or util>_GPU_BUSY_UTIL:
+            return (f'显卡正忙，稍等几秒再试（别的程序正在用 GPU：显存 {mem}MB、占用 {util}%，'
+                    f'可能是游戏、ComfyUI 或刚跑完的任务）')
+    return None
 def gpu_preflight(cfg):
     # GPU release (embedder close / empty_cache) can lag a couple of seconds
     # behind a just-finished task; retry briefly before declaring the GPU busy
@@ -86,12 +135,15 @@ def _gpu_preflight_once(cfg):
         if q['queue_running'] or q['queue_pending']:raise ServiceError('显卡正忙：ComfyUI 正在出图，等它跑完再点「开始出片」')
     r=subprocess.run(['nvidia-smi','--query-gpu=index,memory.used,utilization.gpu','--format=csv,noheader,nounits'],capture_output=True,text=True,timeout=30)
     if r.returncode or not r.stdout.strip():raise ServiceError('GPU preflight nvidia-smi unavailable')
-    for line in r.stdout.strip().splitlines():
-        _,mem,util=[int(x.strip()) for x in line.split(',')]
-        if mem>1500 or util>5:raise ServiceError(f'显卡正忙，稍等几秒再试（别的程序正在用 GPU：显存 {mem}MB、占用 {util}%，可能是游戏、ComfyUI 或刚跑完的任务）')
+    rows=_parse_smi_rows(r.stdout)
+    # Fail-closed: unparseable nvidia-smi output must refuse the run, never be
+    # read as "the GPU is idle".
+    if rows is None:raise ServiceError('GPU preflight nvidia-smi malformed')
+    reason=_gpu_busy_reason(rows)
+    if reason:raise ServiceError(reason)
 class WorkbenchService:
     def __init__(self,cfg,store,queue,embedder_factory=None,start=True):
-        self.cfg=cfg;self.store=store;self.queue=queue;self.browser=FolderBrowser(cfg.nas_roots);self.embedder_factory=embedder_factory or (lambda:ProductionEmbedder(cfg.model_dir));self.stop_flag=threading.Event();self.worker=None;self.gpu_mutex=threading.RLock()
+        self.cfg=cfg;self.store=store;self.queue=queue;self.browser=FolderBrowser(cfg.nas_roots);self.embedder_factory=embedder_factory or (lambda:ProductionEmbedder(cfg.model_dir));self.stop_flag=threading.Event();self.worker=None;self.gpu_mutex=threading.RLock();self._running_job_id=None
         self.preview_root=Path(cfg.data_root)/'voice-previews';self.preview_root.mkdir(parents=True,exist_ok=True);reject_links(self.preview_root);self._previews={};self._preview_lock=threading.RLock();self._preview_generation_lock=threading.Lock()
         if start:self.start()
     def start(self):
@@ -230,7 +282,7 @@ class WorkbenchService:
     def index_state(self,pid):
         p=self.store.get_product(pid);rec=self.store.get_index(p.get('index_id')) if p.get('index_id') else None
         obsolete=bool(rec and (rec['source']!=(p.get('source') or {}).get('path') or self._indexer(None).is_obsolete(rec)))
-        return {'ready':bool(rec and not obsolete),'obsolete':obsolete,'index':{'id':rec['id'],'count':rec['count'],'created_at':rec['created_at'],'synthetic':rec['synthetic']} if rec else None,'tasks':[self.public_job(j) for j in self.queue.all(pid) if j['input'].get('kind')=='index']}
+        return {'ready':bool(rec and not obsolete),'obsolete':obsolete,'index':{'id':rec['id'],'count':rec['count'],'created_at':rec['created_at'],'synthetic':rec['synthetic'],'skipped':public_skipped(rec.get('skipped'))} if rec else None,'tasks':[self.public_job(j) for j in self.queue.all(pid) if j['input'].get('kind')=='index']}
     def _ready_index(self,pid):
         p=self.store.get_product(pid);rec=self.store.get_index(p.get('index_id')) if p.get('index_id') else None
         if not rec or rec['product_id']!=pid or rec['source']!=(p.get('source') or {}).get('path') or self._indexer(None).is_obsolete(rec):raise ServiceError('索引不存在或素材已变化，请重新建索引')
@@ -412,6 +464,41 @@ class WorkbenchService:
         j=self.queue.get(jid)
         if j['product_id']!=pid:raise KeyError(jid)
         self.queue.cancel(jid);return self.public_job(self.queue.get(jid))
+    def _pause_requested(self,jid):
+        return bool(self.queue.get(jid).get('pause_requested'))
+    def _pause_aware_cancel(self,jid,cancel):
+        """Cooperative pause for job kinds that have no dedicated pause plumbing.
+
+        Render stages already poll `cancel` at safe points, so a pause is
+        implemented by blocking there: no new stage is started while suspended,
+        no work is charged, and a cancel arriving during the pause still aborts
+        promptly.  The queue only reports `paused` once this worker actually
+        reaches such a boundary -- it is not claimed at request time.  The
+        already-running OWNED subprocess (ffmpeg/TTS) cannot be OS-suspended and
+        keeps finishing its current step; that limit is surfaced in the UI copy.
+        """
+        def poll():
+            if self._pause_requested(jid):
+                self.queue.pause_ack(jid)
+                while self._pause_requested(jid):
+                    if cancel():raise Cancelled('cancel while paused')
+                    time.sleep(0.2)
+                self.queue.update(jid,status='running',stage='resuming')
+            return cancel()
+        return poll
+    def pause(self,pid,jid):
+        j=self.queue.get(jid)
+        if j['product_id']!=pid:raise KeyError(jid)
+        if not self.queue.pause(jid):raise ServiceError('任务已结束，无法暂停')
+        return self.public_job(self.queue.get(jid))
+    def resume(self,pid,jid):
+        j=self.queue.get(jid)
+        if j['product_id']!=pid:raise KeyError(jid)
+        # A worker still inside this job resumes where it stopped (the index
+        # pipeline picks up between batches); a paused job whose worker is gone
+        # (app restarted) goes back into the queue.
+        if not self.queue.resume(jid,live=self._running_job_id==jid):raise ServiceError('任务不在暂停状态')
+        return self.public_job(self.queue.get(jid))
     _IMG_EXT={'.jpg','.jpeg','.png','.webp','.bmp'}
     _COVER_TYPES={'image/jpeg':'.jpg','image/png':'.png','image/webp':'.webp'}
     def _bind_media(self,entry,label,need_kind=False):
@@ -512,16 +599,28 @@ class WorkbenchService:
                 subprocess.Popen(['explorer',folder]);opened=True
             except Exception:opened=False
         return {'opened':opened,'path':folder}
+    def _finish_cancelled(self,jid,e):
+        """Terminal bookkeeping for a worker-observed cancel/interrupt.
+
+        Some other path may have finalised the job first -- cancel() moves a
+        paused job straight to `cancelled` while this worker is still
+        reporting (the exit race) -- so the state already recorded is kept and
+        this bookkeeping must never raise into the worker thread."""
+        try:
+            self.queue.update(jid,status='cancelled' if not self.stop_flag.is_set() else 'interrupted',stage='cancelled',error={'stage':'cancel','check':'requested','message':str(e)})
+        except ValueError:
+            pass    # already terminal: queue.update refuses a rewrite; record nothing
     def _loop(self):
         while not self.stop_flag.is_set():
             job=self.queue.next()
             if not job:self.stop_flag.wait(.2);continue
             jid=job['id'];cancel=lambda:self.stop_flag.is_set() or self.queue.get(jid).get('cancel_requested',False)
+            self._running_job_id=jid
             try:
                 if sha256(self.queue.root/jid/'input.json')!=job['input_sha256']:raise ServiceError('input.json SHA changed')
                 if job['input']['kind']=='index':self._run_index(job,cancel)
-                else:self._run_render(job,cancel)
-            except (InterruptedError,Cancelled) as e:self.queue.update(jid,status='cancelled' if not self.stop_flag.is_set() else 'interrupted',stage='cancelled',error={'stage':'cancel','check':'requested','message':str(e)})
+                else:self._run_render(job,self._pause_aware_cancel(jid,cancel))
+            except (InterruptedError,Cancelled) as e:self._finish_cancelled(jid,e)
             except Exception as e:
                 if getattr(e,'after_replace',False):
                     try:
@@ -531,28 +630,68 @@ class WorkbenchService:
                     continue
                 details=getattr(e,'details',None) or {'stage':job.get('stage','worker'),'check':type(e).__name__,'message':str(e)}
                 self.queue.update(jid,status='failed',stage='failed',error=details)
+            finally:self._running_job_id=None
     def _run_index(self,j,cancel):
         x=j['input'];p=self.store.get_product(j['product_id'])
         if (p.get('source') or {}).get('path')!=(x['source'] or {}).get('path') or not self._snapshot_fresh(x,require_mapping=False):raise ServiceError('index/source generation changed')
-        with self.gpu_mutex:
-            if self.cfg.model_dir:gpu_preflight(self.cfg)
-            with gpu_guard(self.cfg) if self.cfg.model_dir else _null():
-                if self.cfg.model_dir:gpu_preflight(self.cfg)
-                emb=self.embedder_factory()
-                try:
-                    idx=self._indexer(emb)
-                    baseline=None
-                    cur=self.store.get_product(j['product_id'])
-                    if cur.get('index_id'):
-                        prev_rec=self.store.get_index(cur['index_id'])
-                        if prev_rec and prev_rec.get('source')==x['source']['path']:baseline=prev_rec
-                    def progress(n,total,reused=0):self.queue.update(j['id'],stage='embedding',progress=round(n/total*95),indexed=n,total=total,reused=reused)
-                    rec=idx.build(j['product_id'],x['source']['path'],x['settings'],x['model_identity'],progress,cancel,baseline=baseline)
-                finally:
-                    if hasattr(emb,'close'):emb.close()
+        # The GPU lock, the lock file and the embedder (VRAM) are held as one
+        # re-acquirable slot: a pause released at a file boundary must give all
+        # three back, and a resume must take them again before work continues.
+        slot={'emb':None,'guard':None,'held':False}
+        def acquire():
+            if slot['held']:return
+            self.gpu_mutex.acquire()
+            try:
+                if self.cfg.model_dir:
+                    gpu_preflight(self.cfg)
+                    slot['guard']=gpu_guard(self.cfg)
+                    slot['guard'].__enter__()
+                    gpu_preflight(self.cfg)
+                slot['emb']=self.embedder_factory()
+            except BaseException:
+                if slot['guard'] is not None:
+                    try:slot['guard'].__exit__(None,None,None)
+                    finally:slot['guard']=None
+                self.gpu_mutex.release();raise
+            slot['held']=True
+        def release():
+            if not slot['held']:return
+            slot['held']=False
+            try:
+                if slot['emb'] is not None and hasattr(slot['emb'],'close'):slot['emb'].close()
+            finally:
+                slot['emb']=None
+                if slot['guard'] is not None:
+                    try:slot['guard'].__exit__(None,None,None)
+                    finally:slot['guard']=None
+                self.gpu_mutex.release()
+        idx=None
+        acquire()
+        try:
+            idx=self._indexer(slot['emb'])
+            baseline=None
+            cur=self.store.get_product(j['product_id'])
+            if cur.get('index_id'):
+                prev_rec=self.store.get_index(cur['index_id'])
+                if prev_rec and prev_rec.get('source')==x['source']['path']:baseline=prev_rec
+            def progress(n,total,reused=0,skipped=0):self.queue.update(j['id'],stage='embedding',progress=round(n/total*95),indexed=n,total=total,reused=reused,skipped=skipped)
+            def on_pause():
+                # The indexer confirmed the boundary, so the queue may honestly
+                # say 'paused' -- and the GPU lock/model are released right away
+                # instead of being held while nothing runs.
+                self.queue.pause_ack(j['id'])
+                release()
+            def on_resume():
+                acquire()
+                idx.embedder=slot['emb']
+            rec=idx.build(j['product_id'],x['source']['path'],x['settings'],x['model_identity'],progress,cancel,
+                          pause=lambda:self._pause_requested(j['id']),on_pause=on_pause,on_resume=on_resume,baseline=baseline)
+        finally:
+            release()
         if cancel():raise Cancelled('index/cancel')
         p2=self.store.get_product(j['product_id'])
         if (p2.get('source') or {}).get('path')!=(x['source'] or {}).get('path') or not self._snapshot_fresh({'source':x['source'],'source_fingerprints':[e['fingerprint'] for e in rec['files']]},require_mapping=False) or self._indexer(None).is_obsolete(rec): raise ServiceError('index/source changed during build')
+        skipped_public=public_skipped(rec.get('skipped'))
         with self.store.lock,self.queue.lock:
             self.store.put_index(j['product_id'],rec,x['selection_revision'])
             def commit(candidate):
@@ -560,7 +699,7 @@ class WorkbenchService:
                 queued=candidate[j['id']]
                 return ((current.get('source') or {}).get('path')==(x['source'] or {}).get('path') and current.get('index_id')==rec['id'] and self.store.get_index(rec['id'])==rec and queued.get('input_sha256')==j.get('input_sha256') and not self._indexer(None).is_obsolete(rec) and self._snapshot_fresh({'source':x['source'],'source_fingerprints':[e['fingerprint'] for e in rec['files']]},require_mapping=False))
             try:
-                self.queue.update(j['id'],status='done',stage='indexed',progress=100,index_id=rec['id'],condition=commit)
+                self.queue.update(j['id'],status='done',stage='indexed',progress=100,index_id=rec['id'],indexed=len(rec['files']),total=len(rec['files'])+len(skipped_public),skipped=len(skipped_public),skipped_files=skipped_public,condition=commit)
             except Exception as e:
                 raise QueueCommitError('index stored but queue terminal commit requires reconciliation',after_replace=True) from e
     def _run_render(self,j,cancel):

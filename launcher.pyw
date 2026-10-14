@@ -32,7 +32,9 @@ def _browser():
 cfg_data=_read_config()
 host=str(cfg_data.get('host') or '127.0.0.1')
 port=int(cfg_data.get('port') or 8765)
-url=f'http://{host}:{port}/'
+# A wildcard bind address is not a browsable URL: open the local loopback.
+browse_host=host if host not in ('0.0.0.0','::') else '127.0.0.1'
+url=f'http://{browse_host}:{port}/'
 with (log/'launcher.log').open('a',encoding='utf8') as f:
     proc=subprocess.Popen([str(py),str(root/'boot_workbench.py'),'--config',str(cfg)],cwd=root,
                           stdout=f,stderr=subprocess.STDOUT,

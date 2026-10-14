@@ -57,17 +57,20 @@ function persistSettings(){if(!state.product)return;clearTimeout(state.settingsT
     state.product=p;const i=state.products.findIndex(x=>x.id===p.id);if(i>=0)state.products[i]=p;window.__lastPersistErr=''}
   catch(e){if(window.__lastPersistErr!==e.message){window.__lastPersistErr=e.message;toast('设置没保存上：'+e.message,'warn')}}},600)}
 function renderTop(){const sel=$('#prodSel');if(!sel)return;sel.innerHTML='<option value="">（未选择商品）</option>'+state.products.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('');sel.value=state.product?state.product.id:''}
-function idxText(st){if(st.loading)return '正在检查素材状态…';if(st.error)return esc(st.error);if(st.ready)return `索引 ${st.index.count} 个视频，可用于出片`;const t=(st.tasks||[]).slice(-1)[0];
-if(t&&['queued','running'].includes(t.status))return `正在解析素材：已解析 ${t.indexed||0}/${t.total||'?'} 条`+(t.reused?`（复用 ${t.reused} 条）`:'')+'，页面别关';
+function idxText(st){if(st.loading)return '正在检查素材状态…';if(st.error)return esc(st.error);if(st.ready)return `索引 ${st.index.count} 个视频，可用于出片${skipSummary(st)}`;const t=(st.tasks||[]).slice(-1)[0];
+if(t&&['queued','running'].includes(t.status))return `正在解析素材：已解析 ${t.indexed||0}/${t.total||'?'} 条`+(t.reused?`（复用 ${t.reused} 条）`:'')+(t.skipped?`（跳过 ${t.skipped} 条）`:'')+'，页面别关';
+if(t&&t.status==='paused')return `索引已暂停${t.skipped?`（已跳过 ${t.skipped} 条）`:''}：到任务队列点「继续」接着跑，点「取消」停止`;
+if(t&&t.status==='done'&&t.skipped)return `上次索引：成功 ${t.indexed||0} 个，跳过 ${t.skipped} 个（${skipReasonText(t.skipped_files)}）——跳过的素材会在下次建索引时重试`;
 return '尚无有效索引——选好素材文件夹后点「开始建索引」（第一次会先校验素材，需要一点时间）'}
 function indexRunningJob(st){const t=(st.tasks||[]).slice(-1)[0];return t&&['queued','running'].includes(t.status)?t:null}
+function indexPausedJob(st){const t=(st.tasks||[]).slice(-1)[0];return t&&t.status==='paused'?t:null}
 async function refreshIdxState(){if(!state.product)return;const pid=state.product.id;
   try{const st=await api(`/api/products/${pid}/index`,{timeoutMs:180000});
     if(!state.product||state.product.id!==pid)return;
     state.indexInfo=st;state.indexReady=!!st.ready;
     const t=$('#idxStatus');if(t)t.textContent=idxText(st);
-    const run=indexRunningJob(st);const b=$('#btnIndex');
-    if(b){if(run){b.disabled=true;b.textContent='正在建索引…'}else{b.disabled=!state.product.source;b.textContent=st.ready?'更新索引':'开始建索引'}}
+    const run=indexRunningJob(st);const pausedJob=indexPausedJob(st);const b=$('#btnIndex');
+    if(b){if(run){b.disabled=true;b.textContent='正在建索引…'}else if(pausedJob){b.disabled=true;b.textContent='索引已暂停（见任务队列）'}else{b.disabled=!state.product.source;b.textContent=st.ready?'更新索引':'开始建索引'}}
     const go=$('#btnGo'),gh=$('#goHint');if(go){go.disabled=!st.ready;if(gh)gh.textContent=st.ready?'':'先在①建立索引，就能一键出片'}
   }catch(e){const t=$('#idxStatus');if(t)t.textContent='素材状态检查失败：'+e.message}}
 async function renderMaterials(){const el=$('#secMaterials');if(!el)return;
@@ -316,12 +319,15 @@ async function makeJobs(){if(!state.product)return;const bj=$('#btnGo'),info=$('
   catch(e){toast(e.message,'warn')}
   finally{if(bj){bj.disabled=false;bj.textContent='开始出片'}if(gh)gh.textContent=state.indexReady?'':'先在①建立索引，就能一键出片';if(info&&state.batchMode==='single')onBatchCount()}}
 /* ---------- 任务队列 / 结果 ---------- */
-const STAGE_CN={starting:'准备中',embedding:'解析素材',indexed:'解析完成',voice:'配音中',render:'剪辑中',export:'导出中',done:'完成',failed:'失败',cancelled:'已取消',restart:'已中断',queued:'排队中'};
-const STATUS_CN={queued:'排队中',running:'进行中',done:'已完成',failed:'失败',cancelled:'已取消',interrupted:'已中断'};
+const STAGE_CN={starting:'准备中',embedding:'解析素材',indexed:'解析完成',voice:'配音中',render:'剪辑中',export:'导出中',done:'完成',failed:'失败',cancelled:'已取消',restart:'已中断',queued:'排队中',paused:'已暂停',resuming:'继续中'};
+const STATUS_CN={queued:'排队中',running:'进行中',done:'已完成',failed:'失败',cancelled:'已取消',interrupted:'已中断',paused:'已暂停'};
 function cn(m,s){return m[s]||s||''}
-function tagCls(s){return s==='running'?'run':s==='done'?'ok':s==='failed'?'bad':(s==='cancelled'||s==='interrupted')?'off':''}
+function tagCls(s){return s==='running'?'run':s==='done'?'ok':s==='failed'?'bad':s==='paused'?'pause':(s==='cancelled'||s==='interrupted')?'off':''}
+function skipReasonText(rows){const uniq=[...new Set((rows||[]).map(x=>x&&(x.reason_cn||x.reason)).filter(Boolean))];return uniq.length?uniq.join('、'):'原因见服务端记录'}
+function skipSummary(st){const sk=(st&&st.index&&st.index.skipped)||[];if(!sk.length)return '';const by={};sk.forEach(x=>{const k=x.reason_cn||'读取失败';by[k]=(by[k]||0)+1});return `；跳过 ${sk.length} 个（${Object.keys(by).map(k=>k+' '+by[k]+' 个').join('，')}）`}
 function jobLine(j){let extra='';
-  if(j.status==='running'&&j.stage==='embedding'&&Number.isInteger(j.indexed))extra=` · 已解析 ${j.indexed}/${j.total||'?'}`+(j.reused?`（复用 ${j.reused}）`:'');
+  if(['running','paused'].includes(j.status)&&j.stage==='embedding'&&Number.isInteger(j.indexed))extra=` · 已解析 ${j.indexed}/${j.total||'?'}`+(j.reused?`（复用 ${j.reused}）`:'')+(j.skipped?`（跳过 ${j.skipped}）`:'');
+  if(j.status==='done'&&Number.isInteger(j.indexed))extra=` · 成功 ${j.indexed}/${j.total||'?'}`+(j.skipped?`（跳过 ${j.skipped}：${esc(skipReasonText(j.skipped_files))}）`:'');
   if(j.stage==='render'&&Number.isInteger(j.progress))extra='';
   const v=Number.isInteger(j.variant)?' · v'+j.variant:'';
   return `${j.id.slice(0,8)}${v} · ${esc(cn(STAGE_CN,j.stage))} · ${j.progress||0}%${extra}`}
@@ -349,22 +355,30 @@ function humanError(j){const e=(j.error||{});return humanMsg(e.message||e.check|
 const QUEUE_PER_PAGE=10;
 const QUEUE_FILTERS=[['all','全部'],['active','进行中'],['failed','失败'],['done','完成']];
 function queueFilterJobs(){const f=state.queueFilter||'all';const j=state.jobs;
-  if(f==='active')return j.filter(x=>['queued','running'].includes(x.status));
+  if(f==='active')return j.filter(x=>['queued','running','paused'].includes(x.status));
   if(f==='failed')return j.filter(x=>x.status==='failed');
   if(f==='done')return j.filter(x=>x.status==='done');
   return j}
 function queueSetFilter(f){state.queueFilter=f;state.queuePage=1;renderQueue()}
 function queueGo(d){const pages=Math.max(1,Math.ceil(queueFilterJobs().length/QUEUE_PER_PAGE));state.queuePage=Math.min(pages,Math.max(1,(state.queuePage||1)+d));renderQueue()}
+/* paused jobs are held by the server, not merely hidden: 继续 hands them back.
+   暂停 is a request: 索引在文件边界、出片在步骤边界停下，状态变「已暂停」后再点「继续」。 */
+function jobActions(j){if(!state.product)return '';
+  const btn=(label,fn)=>`<button class="secondary small" onclick="${fn}('${j.id}')">${label}</button>`;
+  if(j.status==='running')return btn('暂停','pauseJob')+btn('取消','cancelJob');
+  if(j.status==='paused')return btn('继续','resumeJob')+btn('取消','cancelJob');
+  if(j.status==='queued')return btn('暂停','pauseJob')+btn('取消','cancelJob');
+  return ''}
 function renderQueue(){const el=$('#secQueue');if(!el)return;
   const all=state.jobs,f=state.queueFilter||'all';
-  const cnt={all:all.length,active:all.filter(x=>['queued','running'].includes(x.status)).length,failed:all.filter(x=>x.status==='failed').length,done:all.filter(x=>x.status==='done').length};
+  const cnt={all:all.length,active:all.filter(x=>['queued','running','paused'].includes(x.status)).length,failed:all.filter(x=>x.status==='failed').length,done:all.filter(x=>x.status==='done').length};
   const jobs=[...queueFilterJobs()].sort((a,b)=>(b.created_at||0)-(a.created_at||0));
   const total=jobs.length;const pages=Math.max(1,Math.ceil(total/QUEUE_PER_PAGE));
   const page=Math.min(pages,Math.max(1,state.queuePage||1));state.queuePage=page;
   const slice=jobs.slice((page-1)*QUEUE_PER_PAGE,page*QUEUE_PER_PAGE);
   const chips=QUEUE_FILTERS.map(([k,label])=>`<button class="qfbtn${f===k?' active':''}" onclick="queueSetFilter('${k}')">${label} <b>${cnt[k]}</b></button>`).join('');
   const pager=`<div class="qfilter">${chips}</div><div class="pager"><span class="muted small">共 ${total} 条</span>${pages>1?`<button class="secondary small" onclick="queueGo(-1)" ${page<=1?'disabled':''}>‹ 上一页</button><span class="small pageno">第 ${page}/${pages} 页</span><button class="secondary small" onclick="queueGo(1)" ${page>=pages?'disabled':''}>下一页 ›</button>`:''}</div>`;
-  el.innerHTML=`<h3><span class="num">3</span>任务队列 <small class="muted">自动刷新</small></h3>${pager}<div class="list">${slice.map(j=>`<div class="item" title="${esc((j.error||{}).message||'')}"><span class="it-main">${jobLine(j)}${['running','queued'].includes(j.status)?`<span class="pbar"><i style="width:${Math.max(2,j.progress||0)}%"></i></span>`:''}</span><span class="row">${j.script_summary&&j.lines_count?`<span class="muted small">「${esc(j.script_summary)}」</span>`:''}<b class="tag ${tagCls(j.status)}">${esc(cn(STATUS_CN,j.status))}</b>${['queued','running'].includes(j.status)&&state.product?`<button class="secondary small" onclick="cancelJob('${j.id}')">取消</button>`:''}</span>${j.status==='failed'&&j.error?`<div class="errline">失败原因：${esc(humanError(j))}</div>`:''}</div>`).join('')||`<p class="muted">${f==='all'?'暂无任务——创建后会在这里逐条显示进度':'当前筛选下没有任务'}</p>`}</div>`}
+  el.innerHTML=`<h3><span class="num">3</span>任务队列 <small class="muted">自动刷新</small></h3>${pager}<div class="list">${slice.map(j=>`<div class="item" title="${esc((j.error||{}).message||'')}"><span class="it-main">${jobLine(j)}${['running','queued','paused'].includes(j.status)?`<span class="pbar"><i style="width:${Math.max(2,j.progress||0)}%"></i></span>`:''}</span><span class="row">${j.script_summary&&j.lines_count?`<span class="muted small">「${esc(j.script_summary)}」</span>`:''}<b class="tag ${tagCls(j.status)}">${esc(cn(STATUS_CN,j.status))}</b>${jobActions(j)}</span>${j.status==='paused'?`<div class="skipline">暂停点＝文件/步骤边界：正在跑的那一步会先结束，暂停期间不再开始新步骤；点「继续」接着跑</div>`:''}${j.status==='failed'&&j.error?`<div class="errline">失败原因：${esc(humanError(j))}</div>`:''}${j.skipped_files&&j.skipped_files.length?`<div class="skipline">跳过 ${j.skipped_files.length} 个素材：${esc(j.skipped_files.map(s=>s.name+'（'+(s.reason_cn||s.reason||'读取失败')+'）').join('、'))} · 下次建索引会自动重试</div>`:''}</div>`).join('')||`<p class="muted">${f==='all'?'暂无任务——创建后会在这里逐条显示进度':'当前筛选下没有任务'}</p>`}</div>`}
 function resultGroups(){const done=state.jobs.filter(j=>j.status==='done'&&j.artifact&&j.lines_count!==undefined);
   const byDate={};done.forEach(j=>{const ts=j.finished_at||j.created_at||0;const dk=dayKey(ts);(byDate[dk]=byDate[dk]||[]).push(j)});
   const dates=Object.keys(byDate).sort((a,b)=>{const va=Math.max(...byDate[a].map(x=>x.finished_at||0)),vb=Math.max(...byDate[b].map(x=>x.finished_at||0));return vb-va});
@@ -390,8 +404,15 @@ async function refreshLive(){if(liveBusy)return;liveBusy=true;
   }catch(e){state.needReload=true}
   finally{liveBusy=false}}
 async function createProduct(){const n=$('#newName').value.trim();if(!n)return;try{const p=await api('/api/products',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:n})});$('#newName').value='';state.product=p;state.previewAudio=null;state.draft='';await load();toast('商品已创建')}catch(e){toast(e.message,'warn')}}
-async function cancelJob(id){const ok=await confirmDialog('取消这个任务？已经开始的不会退钱，但会尽快停下。');if(!ok)return;
+async function cancelJob(id){const ok=await confirmDialog('取消这个任务？会尽快停下；建索引已完成的文件会保留，下次可续跑。');if(!ok)return;
   try{await api(`/api/products/${state.product.id}/cancel`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({job_id:id})});await refreshLive();toast('已取消')}catch(e){toast(e.message,'warn')}}
+async function pauseJob(id){
+  try{await api(`/api/products/${state.product.id}/pause`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({job_id:id})});await refreshLive();
+    const j=state.jobs.find(x=>x.id===id)||{};
+    toast(j.status==='paused'?'已暂停，点「继续」接着跑':'已请求暂停：会在当前文件/步骤结束后停住（状态变「已暂停」后再点「继续」）')}
+  catch(e){toast(e.message,'warn')}}
+async function resumeJob(id){
+  try{await api(`/api/products/${state.product.id}/resume`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({job_id:id})});await refreshLive();toast('已继续')}catch(e){toast(e.message,'warn')}}
 /* ---------- init ---------- */
 $('#prodSel').onchange=e=>{state.product=state.products.find(p=>p.id===e.target.value)||null;state.previewAudio=null;state.draft='';state.retrieval=[];state.bgm=null;state.cover=null;state.intro=null;state.outro=null;state.indexInfo=null;state.indexReady=false;idxDirty=true;idxAt=0;load()};
 $('#newName').addEventListener('keydown',e=>{if(e.key==='Enter')createProduct()});

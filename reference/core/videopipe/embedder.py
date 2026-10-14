@@ -35,3 +35,14 @@ class Embedder:
     def encode_media(self,payload):
         x=self.model.encode(payload if isinstance(payload,list) else [payload],normalize_embeddings=True,show_progress_bar=False,processing_kwargs=PRESETS[self.preset] or {})
         return normalize(x)[0]
+    def encode_media_many(self,payloads,batch_size=None):
+        """One call for several media payloads, returning every vector.
+
+        `encode_media` accepts a list but returns only the first row, so a
+        batch of clips could not previously be embedded in a single forward
+        pass. Batching is what keeps the GPU busy (indexing was latency-bound)."""
+        items=list(payloads)
+        if not items: raise ValueError("encode_media_many 需要至少一个 payload")
+        kwargs={} if batch_size is None else {"batch_size":int(batch_size)}
+        x=self.model.encode(items,normalize_embeddings=True,show_progress_bar=False,processing_kwargs=PRESETS[self.preset] or {},**kwargs)
+        return normalize(x)

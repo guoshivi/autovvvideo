@@ -1,6 +1,6 @@
 import json, os, threading, uuid, copy, time, tempfile
 from pathlib import Path
-from .fs_authority import commit_scope, assert_mutation_allowed, CommitEffectError
+from .fs_authority import commit_scope, assert_mutation_allowed, CommitEffectError, replace_with_retry
 class Store:
     def __init__(self,path):
         self.path=Path(path); self.path.parent.mkdir(parents=True,exist_ok=True); self.lock=threading.RLock(); self.data=self._load()
@@ -23,7 +23,11 @@ class Store:
                 if before_replace is not None:
                     result=before_replace(value)
                     if result is False: raise ValueError('store final commit condition rejected')
-                os.replace(tmp,self.path)
+                # The final condition is re-checked before every actual replace
+                # attempt (including Windows sharing retries): a condition that
+                # drifted to False must abort the publication, not ride along
+                # with a retry that started earlier.
+                replace_with_retry(tmp,self.path,guard=(None if before_replace is None else (lambda:(before_replace(value) is not False))))
                 published=True
                 # The callback is deliberately repeated after the actual
                 # syscall.  A source or selector can change in an injected
@@ -42,7 +46,7 @@ class Store:
                 if old_raw is None: self.path.unlink(missing_ok=True)
                 else:
                     rb=self.path.with_name(self.path.name+'.reconcile-'+uuid.uuid4().hex)
-                    rb.write_bytes(old_raw); os.replace(rb,self.path)
+                    rb.write_bytes(old_raw); replace_with_retry(rb,self.path)
                 self.data=self._load()
             except Exception: pass
             raise CommitError(str(e),after_replace=True) from e
@@ -51,7 +55,7 @@ class Store:
                 try:
                     if old_raw is None: self.path.unlink(missing_ok=True)
                     else:
-                        rb=self.path.with_name(self.path.name+'.reconcile-'+uuid.uuid4().hex);rb.write_bytes(old_raw);os.replace(rb,self.path)
+                        rb=self.path.with_name(self.path.name+'.reconcile-'+uuid.uuid4().hex);rb.write_bytes(old_raw);replace_with_retry(rb,self.path)
                     self.data=self._load()
                 except Exception: pass
                 raise CommitError('store replace occurred but final condition failed',after_replace=True)

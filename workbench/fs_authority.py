@@ -19,6 +19,39 @@ def assert_mutation_allowed():
     if getattr(_tx,'depth',0):
         raise AuthorityError('mutation is forbidden during final commit validation')
 
+# Indirection so the Windows retry path can be exercised on any host.
+_os_replace = os.replace
+
+def replace_with_retry(src,dst,attempts=60,delay=0.05,guard=None):
+    """os.replace that tolerates a transiently-open destination on Windows.
+
+    A concurrent reader (backup agent, a status monitor, antivirus, Explorer
+    preview) that merely holds the destination open makes MoveFileExW with
+    MOVEFILE_REPLACE_EXISTING fail with ERROR_ACCESS_DENIED (WinError 5) --
+    empirically even when that reader shared delete.  The caller has already
+    written and fsynced the staging file, so the rename is idempotent and may
+    simply be retried until the reader closes its handle.  Any error that is
+    not a sharing/access failure (WinError 5 or 32) is re-raised at once.
+
+    `guard`, when given, is re-evaluated immediately before EVERY actual
+    replace attempt.  A final commit condition that has drifted to False
+    between the staging write and the rename must abort the replace instead of
+    publishing bytes the condition no longer covers; the caller then treats
+    this as a plain (non-published) commit failure.
+    """
+    import time
+    last=None
+    for _ in range(max(1,int(attempts))):
+        if guard is not None and guard() is False:
+            raise ValueError('final commit condition rejected before replace')
+        try:
+            _os_replace(src,dst);return
+        except OSError as e:
+            if getattr(e,'winerror',None) not in (5,32): raise
+            last=e;time.sleep(delay)
+    if last is None:raise OSError('replace failed without a recorded error')
+    raise last
+
 def lexical_under(path, root):
     p, r = Path(path).absolute(), Path(root).absolute()
     try: p.relative_to(r)

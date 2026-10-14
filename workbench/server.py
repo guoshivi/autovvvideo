@@ -258,6 +258,8 @@ class WorkbenchHandler(BaseHTTPRequestHandler):
                 if parts[-1]=='index':return self._json(svc.request_index(pid),202)
                 if parts[-1]=='jobs':return self._json(svc.enqueue(pid,int(body.get('count',1)),body.get('text'),body.get('settings')),202)
                 if parts[-1]=='cancel':return self._json(svc.cancel(pid,body['job_id']))
+                if parts[-1]=='pause':return self._json(svc.pause(pid,body['job_id']))
+                if parts[-1]=='resume':return self._json(svc.resume(pid,body['job_id']))
                 if parts[-1]=='ai-copy':return self._json(svc.ai_copy(pid,body))
                 if parts[-1]=='open-folder':return self._json(svc.open_folder(pid,body.get('job_id')))
             if u.path=='/api/retrieval':return self._json(svc.retrieve(body['product_id'],body.get('text','')))
