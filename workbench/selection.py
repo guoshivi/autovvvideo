@@ -14,7 +14,7 @@ Two mechanisms keep films from re-using the same shots:
 
 import hashlib
 import math
-from .pacing import estimate_slot_seconds,voice_slot_seconds
+from .pacing import estimate_slot_seconds,voice_slot_seconds,sentence_slot_seconds
 
 def _key(c):
     return (c.get('path'), float(c.get('start') or 0))
@@ -94,17 +94,21 @@ def prefix_plan(mapping, lines, settings, voices=None, seconds=15):
     elapsed=0;out=[]
     for i,(line,row) in enumerate(zip(lines,mapping)):
         if elapsed>=seconds:break
-        if voices and i<len(voices):want=voice_slot_seconds(float(voices[i])/24000)
-        elif settings.get('voice'):want=estimate_slot_seconds(len(line),4.0*float(settings.get('speed') or 1))
+        gap=settings.get('sentence_gap_seconds')
+        if voices and i<len(voices):want=voice_slot_seconds(float(voices[i])/24000) if gap is None else sentence_slot_seconds(float(voices[i])/24000,gap,is_last=i==len(lines)-1)
+        elif settings.get('voice'):want=estimate_slot_seconds(len(line),4.0*float(settings.get('speed') or 1)) if gap is None else sentence_slot_seconds(len(line)/(4.0*float(settings.get('speed') or 1)),gap,is_last=i==len(lines)-1)
         else:want=max(2.0,min(8,max(1.8,len(line)/5)))
         remaining=math.ceil(want*30);picker=selector.new_sentence(row)
         while remaining>0 and elapsed<seconds and row:
             c=selector.pick(picker)
-            frames=min(remaining,max(1,math.floor(float(c.get('seconds') or 0)*30)))
+            source_frames=min(remaining,max(1,math.floor(float(c.get('seconds') or 0)*30)))
+            explicit_slice=bool(settings.get('voice')) and settings.get('sentence_gap_seconds') is not None and i<len(lines)-1
+            pad_frames=(remaining-source_frames) if explicit_slice and 0<remaining-source_frames<=3 else 0
+            frames=source_frames+pad_frames
             used=min(frames/30,seconds-elapsed)
             out.append({'sentence':i,'source_sha256':c.get('source_sha256') or c.get('path'),'index_id':c.get('index_id'),'start':float(c.get('start') or 0),'used_seconds':round(used,6),'output_start':round(elapsed,6),'output_end':round(elapsed+used,6),'purpose':'prefix reservation'})
             elapsed+=frames/30;remaining-=frames
-            if 0<remaining<=3:break
+            if 0<remaining<=3 and not explicit_slice:break
     return out
 
 def spread_candidates(rows):

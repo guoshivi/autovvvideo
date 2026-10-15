@@ -1,5 +1,5 @@
 /* 视频工作台 V2 前端（v9：AI 文案 / 语速 / 目标时长 / 常用稿 / 一键出片 / 封面片头尾 / 结果卡片 / 镜头去重） */
-const state={products:[],jobs:[],product:null,draft:'',retrieval:[],roots:[],picker:null,batchMode:'single',batchCount:1,bgm:null,cover:null,intro:null,outro:null,indexReady:false,indexInfo:null,timing:null,aiOpen:false,aiBusy:false,aiHasKey:false,aiOut:null,lastJobsSig:'',lastIndexSample:null,settingsTimer:null,queuePage:1,previewBusy:false,previewAudio:null,cleanUndo:null,voxPresets:null,voxClones:[],voxCloneDir:''};
+const state={products:[],jobs:[],product:null,draft:'',retrieval:[],roots:[],picker:null,batchMode:'single',batchCount:1,bgm:null,cover:null,intro:null,outro:null,indexReady:false,indexInfo:null,timing:null,aiOpen:false,aiBusy:false,aiHasKey:false,aiOut:null,lastJobsSig:'',lastIndexSample:null,settingsTimer:null,settingsTimers:{},queuePage:1,previewBusy:false,previewAudio:null,cleanUndo:null,voxPresets:null,voxClones:[],voxCloneDir:''};
 const $=s=>document.querySelector(s),esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 async function api(url,opt){opt=opt||{};const ctl=new AbortController();const tid=setTimeout(()=>ctl.abort(),opt.timeoutMs||30000);let r;
 try{r=await fetch(url,Object.assign({},opt,{signal:ctl.signal}))}catch(e){clearTimeout(tid);throw Error(e.name==='AbortError'?'请求超时，请再试一次':e.message)}
@@ -34,17 +34,24 @@ async function load(){try{setErr('');syncDraft();
   state.needReload=false;
 }catch(e){state.needReload=true;setErr('服务暂不可用：'+e.message+'（稍等片刻会自动恢复）')}}
 /* ---------- 设置：读取/保存（记住上次选择） ---------- */
-const DEFAULTS={voice:true,subtitles:true,speaker:'Serena',voice_engine:'qwen',vox_voice:'natural_female',speed:1.0,target_seconds:0,shot_reuse:1,subtitle_size:54,subtitle_bottom:380,subtitle_border:3,dedup:'off',beauty:false,beauty_strength:0.25,visual_filter:'original',visual_filter_strength:0.35,bgm:false,bgm_path:'',bgm_volume:0.2,cover:null,intro:null,outro:null};
+const DEFAULTS={voice:true,subtitles:true,speaker:'Serena',voice_engine:'qwen',vox_voice:'natural_female',speed:1.0,sentence_gap_seconds:null,target_seconds:0,shot_reuse:1,subtitle_size:54,subtitle_bottom:380,subtitle_border:3,dedup:'off',beauty:false,beauty_strength:0.25,visual_filter:'original',visual_filter_strength:0.35,bgm:false,bgm_path:'',bgm_volume:0.2,cover:null,intro:null,outro:null};
 function productSettings(){return Object.assign({},DEFAULTS,state.product&&state.product.settings||{})}
-function hydrateSettings(){if(state.settingsTimer)return;
+function hydrateSettings(){if(state.product&&state.settingsTimers&&state.settingsTimers[state.product.id])return;
   const s=productSettings();
   if(!state.cover&&s.cover)state.cover=s.cover;if(!state.intro&&s.intro)state.intro=s.intro;if(!state.outro&&s.outro)state.outro=s.outro;state.bgm=null}
 function collectSettings(){const s=productSettings();
   const num=v=>Number(v)||0;
+  const gapMode=$('#sentenceGapMode'),gapInput=$('#sentenceGap');
+  let sentenceGap=s.sentence_gap_seconds??null;
+  if(gapMode&&gapMode.value==='manual'){
+    const raw=String(gapInput?.value??'').trim(),v=Number(raw);
+    if(!raw||!Number.isFinite(v)||v<0.10-1e-9||v>1.00+1e-9)throw Error('句间停顿需为 0.10–1.00 秒');
+    sentenceGap=Math.round(v*100)/100;
+  }else if(gapMode&&gapMode.value==='auto')sentenceGap=null;
   const cover=state.cover?(state.cover.mode==='file'?(state.cover.path?{mode:'file',path:state.cover.path,...(state.cover.sha256?{sha256:state.cover.sha256}:{})}:null):(state.cover.mode==='frame'?{mode:'frame',seconds:num(state.cover.seconds)||1}:{mode:'auto'})):null;
   const card=v=>v&&v.path?{path:v.path,seconds:num(v.seconds)||3,kind:v.kind,...(v.sha256?{sha256:v.sha256}:{})}:null;
   return {voice:$('#voice')?$('#voice').checked:s.voice,subtitles:$('#subs')?$('#subs').checked:s.subtitles,
-    speaker:$('#speaker')?$('#speaker').value:s.speaker,voice_engine:$('#voiceEngine')?$('#voiceEngine').value:(s.voice_engine||'qwen'),vox_voice:$('#voxVoice')?$('#voxVoice').value:(s.vox_voice||'natural_female'),speed:$('#speed')?num($('#speed').value)||1.0:s.speed,
+    speaker:$('#speaker')?$('#speaker').value:s.speaker,voice_engine:$('#voiceEngine')?$('#voiceEngine').value:(s.voice_engine||'qwen'),vox_voice:$('#voxVoice')?$('#voxVoice').value:(s.vox_voice||'natural_female'),speed:$('#speed')?num($('#speed').value)||1.0:s.speed,sentence_gap_seconds:sentenceGap,
     target_seconds:$('#target')?parseInt($('#target').value||'0',10)||0:s.target_seconds,
     subtitle_size:$('#subSize')?parseInt($('#subSize').value,10):s.subtitle_size,
     subtitle_bottom:$('#subPos')?parseInt($('#subPos').value,10):s.subtitle_bottom,
@@ -55,10 +62,13 @@ function collectSettings(){const s=productSettings();
     beauty:$('#beauty')?$('#beauty').checked:!!s.beauty,beauty_strength:$('#beautyStrength')?num($('#beautyStrength').value):Number(s.beauty_strength??.25),
     visual_filter:$('#visualFilter')?$('#visualFilter').value:(s.visual_filter||'original'),visual_filter_strength:$('#visualFilterStrength')?num($('#visualFilterStrength').value):Number(s.visual_filter_strength??.35),
     cover:cover,intro:card(state.intro),outro:card(state.outro)}}
-function persistSettings(){if(!state.product)return;clearTimeout(state.settingsTimer);
-  state.settingsTimer=setTimeout(async()=>{state.settingsTimer=null;try{const p=await api(`/api/products/${state.product.id}/settings`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({settings:collectSettings()})});
-    state.product=p;const i=state.products.findIndex(x=>x.id===p.id);if(i>=0)state.products[i]=p;window.__lastPersistErr=''}
-  catch(e){if(window.__lastPersistErr!==e.message){window.__lastPersistErr=e.message;toast('设置没保存上：'+e.message,'warn')}}},600)}
+function persistSettings(){if(!state.product)return;const productId=state.product.id;let snapshot;
+  try{snapshot=collectSettings()}catch(e){toast(e.message,'warn');return}
+  const timers=state.settingsTimers||(state.settingsTimers={});clearTimeout(timers[productId]);
+  let timer;timer=setTimeout(async()=>{if(timers[productId]===timer)delete timers[productId];try{const p=await api(`/api/products/${productId}/settings`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({settings:snapshot})});
+    const i=state.products.findIndex(x=>x.id===productId);if(i>=0)state.products[i]=p;if(state.product&&state.product.id===productId&&!timers[productId])state.product=p;window.__lastPersistErr=''}
+  catch(e){if(window.__lastPersistErr!==e.message){window.__lastPersistErr=e.message;toast('设置没保存上：'+e.message,'warn')}}},600);
+  timers[productId]=timer;state.settingsTimer=timer}
 function renderTop(){const sel=$('#prodSel');if(!sel)return;sel.innerHTML='<option value="">（未选择商品）</option>'+state.products.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('');sel.value=state.product?state.product.id:''}
 function idxText(st){if(st.loading)return '正在检查素材状态…';if(st.error)return esc(st.error);if(st.ready)return `索引 ${st.index.count} 个视频，可用于出片${skipSummary(st)}`;const t=(st.tasks||[]).slice(-1)[0];
 if(t&&['queued','running'].includes(t.status))return `正在解析素材：已解析 ${t.indexed||0}/${t.total||'?'} 条`+(t.reused?`（复用 ${t.reused} 条）`:'')+(t.skipped?`（跳过 ${t.skipped} 条）`:'')+'，页面别关';
@@ -87,7 +97,7 @@ function splitLines(t){return String(t||'').split(/\n+/).map(s=>s.trim()).filter
 function onBgmVol(){const el=$('#bgmVol');if(!el)return;const v=Math.max(0,Math.min(100,Number(el.value)||0));const b=$('#bgmVolVal');if(b)b.textContent=v+'%';persistSettings()}
 function estSeconds(){const ta=$('#copy');const lines=splitLines(ta?ta.value:'');if(!lines.length)return 0;
   const sp=Math.max(.85,Math.min(1.5,Number(($('#speed')||{}).value||1)));const voiceOn=$('#voice')?$('#voice').checked:true;
-  let total=0;for(const ln of lines){const n=[...ln].length;total+=voiceOn?Math.max(2,(n*0.27)/sp+0.30):Math.max(2,Math.min(8,Math.max(1.8,n/5)))}
+  let gap=productSettings().sentence_gap_seconds;if($('#sentenceGapMode')?.value==='manual'){const v=Number($('#sentenceGap')?.value);gap=Number.isFinite(v)?v:null}let total=0;for(let i=0;i<lines.length;i++){const n=[...lines[i]].length,cps=4*sp,voiceSeconds=n/cps;const autoSlot=Math.max(voiceSeconds+.18,Math.min(1,voiceSeconds+.35));const slot=voiceOn?(gap!=null&&i<lines.length-1?voiceSeconds+gap:autoSlot):Math.max(2,Math.min(8,Math.max(1.8,n/5)));total+=Math.ceil(slot*30)/30}
   if(state.intro)total+=Number(state.intro.seconds)||0;if(state.outro)total+=Number(state.outro.seconds)||0;
   return Math.round(total*10)/10}
 function renderEstimate(){const chip=$('#estChip'),warn=$('#warnChip');if(!chip)return;
@@ -111,7 +121,7 @@ function renderScript(){const el=$('#secScript');if(!el)return;
 <div class="ai-row"><button class="secondary" id="btnAIGen" onclick="aiTogglePanel()">✨ AI 生成</button><button class="secondary" id="btnAIPolish" onclick="aiRun('polish')">润色</button><button class="secondary" id="btnAIColloq" onclick="aiRun('colloquial')">改口语化</button><button class="secondary" id="btnAISplit" onclick="aiRun('split')">AI 断句</button><button class="secondary" id="btnAIFission" onclick="aiRun('variants')">AI 裂变 N 稿</button><button class="secondary" id="btnAIClean" onclick="cleanCopyLocal()">清理标点</button><button class="secondary" id="btnAIUndo" onclick="undoClean()" style="${state.cleanUndo===null?'display:none':''}">撤销清理</button><button class="secondary" id="btnAIPack" onclick="aiRun('pack')">投放包</button><button class="secondary" id="btnAIAudit" onclick="aiRun('audit')">合规体检</button><button class="secondary" id="btnAIFit" onclick="aiRun('fit')">按时长优化</button><span id="aiStatus" class="muted"></span></div>
 <div id="aiOut" class="ai-out" hidden><div class="row"><b id="aiOutTitle"></b><span class="row"><button class="secondary small" onclick="copyAiOut()">复制全部</button><button class="secondary small" onclick="closeAiOut()">收起</button></span></div><pre id="aiOutBody"></pre></div>
 <div id="aiPanel" class="ai-panel" ${state.aiOpen?'':'hidden'}><div class="advgrid"><label>产品名 <input id="aiName" placeholder="例如：厨房收纳架" value="${esc(state.product.name)}"></label><label class="wide">卖点 <textarea id="aiPoints" rows="2" placeholder="一行一个，例如：分格收纳、可拆洗、适合厨房台面"></textarea></label><label>人群 <input id="aiAudience" placeholder="例如：30-50 岁上班族"></label><label>风格 <input id="aiStyle" placeholder="例如：亲切、生活化"></label></div><div class="row"><button class="primary" onclick="aiRun('generate')">开始生成</button><button class="secondary" onclick="aiTogglePanel()">收起</button></div><div class="ai-krow"><details class="adv" open><summary>AI 接口设置（填一次就记住）</summary><div class="advgrid"><label>接口地址 <input id="aiBaseUrl" placeholder="https://api.deepseek.com"></label><label>密钥 <span class="row"><input id="aiKey" type="password" placeholder="${state.aiHasKey?'已配置（留空不改动）':'未配置'}"><button class="secondary small" onclick="saveAiSettings()">保存</button><button class="secondary small" id="aiKeyClear" onclick="clearAiKey()" style="${state.aiHasKey?'':'display:none'}">清除密钥</button></span></label><span class="muted wide">密钥只保存在这台 Win 机上，不会显示回页面；留空则保持原密钥不变。使用 AI 时，文案和产品信息会发送给所填写的服务商。</span></div><details><summary>高级：模型名称（可选）</summary><label>模型 <input id="aiModel" placeholder="服务商提供的模型 ID；留空保持原值"></label></details></details></div></div>
-<div class="settings-row"><label><input id="voice" type="checkbox" ${s.voice?'checked':''} onchange="onSettingChange()"> 语音</label><label><input id="subs" type="checkbox" ${s.subtitles?'checked':''} onchange="onSettingChange()"> 字幕</label><label class="voice-engine-label">配音 <select id="voiceEngine" onchange="onEngineChange()"><option value="qwen" ${engine==='qwen'?'selected':''}>Qwen（原配音）</option><option value="vox" ${engine==='vox'?'selected':''}>Vox（新配音·试用）</option></select></label><label class="slider-label">语速 <input id="speed" type="range" min="0.85" max="1.5" step="0.05" value="${Number(s.speed)||1}" oninput="onSpeedInput()"> <b id="speedVal">${(Number(s.speed)||1).toFixed(2).replace(/0$/,'').replace(/\.$/,'.0')}×</b></label><label>目标时长 <input id="target" type="number" min="0" max="3600" step="1" value="${Number(s.target_seconds)||''}" placeholder="不设" oninput="renderEstimate();persistSettings()"> 秒</label></div>
+<div class="settings-row"><label><input id="voice" type="checkbox" ${s.voice?'checked':''} onchange="onVoiceToggle()"> 语音</label><label><input id="subs" type="checkbox" ${s.subtitles?'checked':''} onchange="onSettingChange()"> 字幕</label><label class="voice-engine-label">配音 <select id="voiceEngine" onchange="onEngineChange()"><option value="qwen" ${engine==='qwen'?'selected':''}>Qwen（原配音）</option><option value="vox" ${engine==='vox'?'selected':''}>Vox（新配音·试用）</option></select></label><label class="slider-label">语速 <input id="speed" type="range" min="0.85" max="1.5" step="0.05" value="${Number(s.speed)||1}" oninput="onSpeedInput()"> <b id="speedVal">${(Number(s.speed)||1).toFixed(2).replace(/0$/,'').replace(/\.$/,'.0')}×</b></label><label>句间停顿 <select id="sentenceGapMode" ${s.voice?'':'disabled'} onchange="onSentenceGapModeChange()"><option value="auto" ${s.sentence_gap_seconds==null?'selected':''}>自动（0.18–0.35 秒）</option><option value="manual" ${s.sentence_gap_seconds!=null?'selected':''}>手动</option></select> <input id="sentenceGap" type="number" min="0.10" max="1.00" step="0.01" value="${s.sentence_gap_seconds==null?'':Number(s.sentence_gap_seconds).toFixed(2)}" placeholder="0.10–1.00" ${s.voice?'':'disabled'} oninput="onSentenceGapInput()"> 秒</label><label>目标时长 <input id="target" type="number" min="0" max="3600" step="1" value="${Number(s.target_seconds)||''}" placeholder="不设" oninput="renderEstimate();persistSettings()"> 秒</label></div>
 <div class="settings-row voice-row">
 <label class="engine-control qwen-control" style="${engine==='qwen'?'':'display:none'}">Qwen 说话人 <select id="speaker" onchange="onSettingChange()"><option value="Serena" ${s.speaker==='Serena'?'selected':''}>Serena（自然女声）</option><option value="Vivian" ${s.speaker==='Vivian'?'selected':''}>Vivian（清晰女声）</option><option value="Uncle_Fu" ${s.speaker==='Uncle_Fu'?'selected':''}>Uncle Fu（成熟男声）</option></select></label>
 <label class="engine-control vox-control" style="${engine==='vox'?'':'display:none'}">Vox 声音 <select id="voxVoice" onchange="onSettingChange()">${voxVoiceOptions(s.vox_voice)}</select><button class="secondary small" onclick="refreshVoxVoices()" title="重新扫描克隆文件夹">刷新音色</button><span class="muted" title="${esc(state.voxCloneDir)}">丢音频到克隆文件夹即可添加：${esc(state.voxCloneDir||'读取中…')}</span></label><button class="secondary small" id="btnVoicePreview" onclick="previewVoice()" ${state.previewBusy?'disabled':''}>${state.previewBusy?'正在试听…':'试听当前配音'}</button><span id="voicePreviewStatus" class="muted"></span><audio id="voicePreviewAudio" controls preload="none" style="${state.previewAudio?'':'display:none'}" src="${state.previewAudio?esc(state.previewAudio):''}"></audio>
@@ -138,9 +148,13 @@ function renderScript(){const el=$('#secScript');if(!el)return;
 <div class="row"><button class="secondary" onclick="saveCopy()">保存脚本</button><button class="secondary" onclick="previewRetrieval()">检索预览</button></div>
 <div id="retrieval" class="retrieval">${state.retrieval.map(x=>`<div><b>第${x.sentence_id+1}句</b> ${esc(x.line)}<br><small>${x.candidates.map(c=>esc(c.path.split(/[\\/]/).pop())+' '+Number(c.score).toFixed(3)).join(' · ')}</small></div>`).join('')}</div>
 </details>`;
-  renderBatchBox();renderCopyList();renderEstimate()}
+  renderBatchBox();renderCopyList();renderEstimate();syncSentenceGapUI()}
+function syncSentenceGapUI(){const voice=$('#voice'),mode=$('#sentenceGapMode'),input=$('#sentenceGap');const muted=!!voice&&!voice.checked;const auto=!mode||mode.value==='auto';if(mode)mode.disabled=muted;if(input){input.disabled=muted||auto;if(auto)input.value=''}}
+function onVoiceToggle(){syncSentenceGapUI();timingChanged();persistSettings()}
+function onSentenceGapModeChange(){const mode=$('#sentenceGapMode'),input=$('#sentenceGap');if(mode&&mode.value==='manual'&&input&&!String(input.value||'').trim())input.value='0.10';if(mode&&mode.value==='auto'&&input)input.value='';syncSentenceGapUI();timingChanged();persistSettings()}
 function onSettingChange(){timingChanged();persistSettings()}
 function onSpeedInput(){const v=Number(($('#speed')||{}).value||1);const b=$('#speedVal');if(b)b.textContent=(v).toFixed(2).replace(/0$/,'').replace(/\.$/,'.0')+'×';timingChanged();persistSettings()}
+function onSentenceGapInput(){timingChanged();persistSettings()}
 function onEngineChange(){syncDraft();state.product.settings=collectSettings();state.previewAudio=null;timingChanged();persistSettings();renderScript()}
 function voicePreviewText(){let text=String(($('#copy')||{}).value||'').trim();if(!text)text='这是当前配音的试听片段，确认声音后再开始出片。';text=text.split(/\n+/).map(x=>x.trim()).filter(Boolean)[0]||text;return [...text].slice(0,120).join('')}
 function voicePreviewKey(s,text){return JSON.stringify([state.product?.id||null,s.voice_engine||'qwen',s.speaker,s.vox_voice,Number(s.speed)||1,text])}

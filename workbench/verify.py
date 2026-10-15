@@ -34,7 +34,7 @@ def decode(ffmpeg,path,out,with_audio,cancel=None,timeout=900):
         return y
     return None
 
-def verify_media(path,ffmpeg,ffprobe,timeline,expected=None,voice_wavs=None,mode='silent',cancel=None,timeout=900,eos_receipts=None,frozen_voice_pcm=None,expected_engine='qwen'):
+def verify_media(path,ffmpeg,ffprobe,timeline,expected=None,voice_wavs=None,mode='silent',cancel=None,timeout=900,eos_receipts=None,frozen_voice_pcm=None,expected_engine='qwen',sentence_gap_seconds=None):
     """Verify a final file against the immutable original-clock PCM contract.
 
     ``expected`` is the complete, read-only final PCM master.  For mixed audio,
@@ -162,9 +162,17 @@ def verify_media(path,ffmpeg,ffprobe,timeline,expected=None,voice_wavs=None,mode
         checks['voice_padding']=True
         pauses=[float(timeline[i+1]['start'])-(float(timeline[i]['start'])+len(voice_samples[i])/24000) for i in range(len(timeline)-1)]
         pause_max=max(pauses,default=0.0)
-        for i,pause in enumerate(pauses):
-            if pause<0.05 or pause>0.40:
-                raise VerificationFailure('verify','sentence pauses',{'values':pauses,'max':pause_max},'>0.05 且 <=0.40',i)
+        if sentence_gap_seconds is None:
+            for i,pause in enumerate(pauses):
+                if pause<0.05 or pause>0.40:
+                    raise VerificationFailure('verify','sentence pauses',{'values':pauses,'max':pause_max},'>0.05 且 <=0.40',i)
+        else:
+            if type(sentence_gap_seconds) not in (int,float) or not math.isfinite(float(sentence_gap_seconds)) or not 0.10-1e-9<=float(sentence_gap_seconds)<=1.00+1e-9:
+                raise VerificationFailure('verify','sentence gap setting',sentence_gap_seconds,'finite number 0.10..1.00')
+            low=float(sentence_gap_seconds)-1e-6;high=float(sentence_gap_seconds)+1/30+1e-6
+            for i,pause in enumerate(pauses):
+                if pause<low or pause>high:
+                    raise VerificationFailure('verify','sentence pauses',{'values':pauses,'max':pause_max},f'{sentence_gap_seconds}..{sentence_gap_seconds+1/30}',i)
         checks['sentence_pauses']=True
         last=timeline[-1];last_start=round(float(last['start'])*24000);last_x=voice_samples[-1];negative=isolated.copy();negative[last_start:min(total_samples,last_start+len(last_x))]=0.0
         negative_corr=correlate_pcm(last_x,negative,last_start)
@@ -213,6 +221,6 @@ def verify_media(path,ffmpeg,ffprobe,timeline,expected=None,voice_wavs=None,mode
                 return True
             if not isinstance(eos_receipts,(list,tuple)) or len(eos_receipts)!=len(voice_wavs) or any(not valid_eos(r) for r in eos_receipts):raise VerificationFailure('verify','EOS receipt',eos_receipts,'complete natural EOS observation with no forced EOS')
             checks['eos']=True
-        return {'ok':True,'checks':checks,'sha256':sha256(path),'bytes':path.stat().st_size,'mode':mode,'correlations':correlations,'voice_correlations':voice_correlations,'negative_control':negative_info,'sentence_pauses':{'values':pauses,'max':pause_max},'aac_packet_bps':measured,'peak':peak,'rms':rms}
+        return {'ok':True,'checks':checks,'sha256':sha256(path),'bytes':path.stat().st_size,'mode':mode,'correlations':correlations,'voice_correlations':voice_correlations,'negative_control':negative_info,'sentence_gap_seconds':sentence_gap_seconds,'sentence_pauses':{'values':pauses,'max':pause_max},'aac_packet_bps':measured,'peak':peak,'rms':rms}
     checks['eos']={'applicable':False,'reason':'voice disabled'}
     return {'ok':True,'checks':checks,'sha256':sha256(path),'bytes':path.stat().st_size,'mode':mode,'correlations':correlations,'aac_packet_bps':measured,'peak':peak,'rms':rms}

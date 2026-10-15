@@ -7,7 +7,7 @@ from .verify import verify_media,read_wav,VerificationFailure
 from .process import run_owned,Cancelled
 from .browser import reject_links,overlaps
 from .selection import VariantSelector,shot_usage
-from .pacing import SENTENCE_GAP_SECONDS,voice_slot_seconds
+from .pacing import SENTENCE_GAP_SECONDS,voice_slot_seconds,sentence_slot_seconds
 from reference.core.videopipe.caption import drawtext_filter,wrap_caption
 from .filters import ffmpeg_filter
 
@@ -110,9 +110,11 @@ def render_video(job,config,jobdir,cancel=None,progress=None,_voice_binding=None
         vpcm=bound[i][2] if wav else []
         if wav:
             vpcm=bound[i][2]
-            # Rhythm: reserve the measured voice plus SENTENCE_GAP_SECONDS; the
-            # shared slot rule keeps short lines readable without long dead air.
-            voice_wavs.append(wav);want=voice_slot_seconds(len(vpcm)/24000)
+            # Rhythm: reserve the measured voice plus the requested gap between
+            # sentences.  The final sentence keeps the legacy tail pad.
+            voice_wavs.append(wav)
+            gap=s.get('sentence_gap_seconds')
+            want=voice_slot_seconds(len(vpcm)/24000) if gap is None else sentence_slot_seconds(len(vpcm)/24000,gap,is_last=i==len(lines)-1)
         else:want=max(2.0,min(8,max(1.8,len(line)/5)))
         frames=math.ceil(want*30);required=frames/30;cap=None
         if s['subtitles']:
@@ -123,8 +125,12 @@ def render_video(job,config,jobdir,cancel=None,progress=None,_voice_binding=None
             c=selector.pick(picker);chosen.append(c);p=Path(c['path']);reject_links(p)
             if not p.is_file() or sha256(p)!=c['source_sha256']:raise ValueError(f'render/source SHA sentence={i} changed')
             sec=float(c['seconds']);start=float(c['start'])
-            nframes=min(remaining,max(1,math.floor(sec*30)));t=nframes/30
+            source_frames=min(remaining,max(1,math.floor(sec*30)))
+            explicit_slice=bool(s.get('voice')) and s.get('sentence_gap_seconds') is not None and i<len(lines)-1
+            pad_frames=(remaining-source_frames) if explicit_slice and 0<remaining-source_frames<=3 else 0
+            nframes=source_frames+pad_frames;t=source_frames/30
             dest=d/f'cut_{i:03d}_{turn:03d}.mp4';vf=_filter(s,None if s.get('beauty') else (str(cap) if cap else None),Path(config.font_path).name if cap and not s.get('beauty') else None)
+            if pad_frames:vf+=f',tpad=stop_mode=clone:stop={pad_frames}'
             # Copy font to controlled ASCII basename, avoiding path escaping in filtergraph.
             if cap and not (d/Path(config.font_path).name).exists():shutil.copyfile(config.font_path,d/Path(config.font_path).name)
             _command([config.ffmpeg,'-nostdin','-n','-v','error','-ss',f'{start:.6f}','-t',f'{t:.6f}','-i',str(p),'-vf',vf,'-an','-c:v','libx264','-preset','veryfast','-crf','20','-r','30','-frames:v',str(nframes),'-pix_fmt','yuv420p',str(dest)],d,config.max_stage_seconds,cancel)
@@ -161,7 +167,7 @@ def render_video(job,config,jobdir,cancel=None,progress=None,_voice_binding=None
             local.append(dest);clips.append(dest);remaining-=nframes;turn+=1
             cut_start=sentence_start+sum(x['used_seconds'] for x in cuts)
             cuts.append({'candidate_ref':{'source_sha256':c.get('source_sha256'),'index_id':c.get('index_id'),'source_start':start,'seconds':sec},'used_seconds':round(nframes/30,6),'frames':nframes,'output_start':round(cut_start,6),'output_end':round(cut_start+nframes/30,6)})
-            if 0<remaining<=3:
+            if 0<remaining<=3 and not explicit_slice:
                 # A ≤3-frame sliver tail (≤0.10s, invisible on screen) is not
                 # worth cutting: tiny fragments destabilize concat frame
                 # bookkeeping (observed +2 phantom frame slots on a 17s film
@@ -262,7 +268,7 @@ def _encode_mux(config,draft,master,phase,attempt,cancel):
     final=attempt/'final.mp4';_command([config.ffmpeg,'-nostdin','-n','-v','error','-i',str(draft),'-itsoffset',str(-phase/24000),'-i',str(audio),'-map','0:v:0','-map','1:a:0','-c','copy','-movflags','+faststart',str(final)],attempt,config.max_stage_seconds,cancel)
     return final
 
-def encode_with_phase_retry(config,draft,master,timeline,voice_wavs,jobdir,mode,cancel=None,eos_receipts=None,source_receipts=None,frozen_voice_pcm=None,expected_engine='qwen'):
+def encode_with_phase_retry(config,draft,master,timeline,voice_wavs,jobdir,mode,cancel=None,eos_receipts=None,source_receipts=None,frozen_voice_pcm=None,expected_engine='qwen',sentence_gap_seconds=None):
     failures=[]
     for phase in PHASE_PREFIXES:
         if cancel and cancel():raise Cancelled('codec/cancel')
@@ -270,7 +276,9 @@ def encode_with_phase_retry(config,draft,master,timeline,voice_wavs,jobdir,mode,
             final=_encode_mux(config,draft,master,phase,Path(jobdir)/f'codec-{phase:04d}',cancel)
             if source_receipts is not None:
                 _assert_voice_sources(voice_wavs,source_receipts)
-            report=verify_media(final,config.ffmpeg,config.ffprobe,timeline,master,voice_wavs,mode,cancel,config.max_stage_seconds,eos_receipts,frozen_voice_pcm=frozen_voice_pcm,expected_engine=expected_engine)
+            verify_kwargs={}
+            if sentence_gap_seconds is not None:verify_kwargs['sentence_gap_seconds']=sentence_gap_seconds
+            report=verify_media(final,config.ffmpeg,config.ffprobe,timeline,master,voice_wavs,mode,cancel,config.max_stage_seconds,eos_receipts,frozen_voice_pcm=frozen_voice_pcm,expected_engine=expected_engine,**verify_kwargs)
             report['codec_phase_samples']=phase;report['codec_attempts']=len(failures)+1
             return final,report
         except VerificationFailure as e:
@@ -283,9 +291,10 @@ def render_job(job,config,jobdir,cancel=None,progress=None):
     d=Path(jobdir);bound=_bind_voice_sources(job,d);draft,timeline,voice_master,wavs,beauty_reports=render_video(job,config,d,cancel,progress,_voice_binding=bound,_return_beauty=True);s=job['settings']
     receipts=[v[1] for v in bound];frozen_pcm=tuple(v[2] for v in bound)
     engine=s.get('voice_engine','qwen')
+    gap_kw={} if s.get('sentence_gap_seconds') is None else {'sentence_gap_seconds':s.get('sentence_gap_seconds')}
     eos_receipts=[v.get('eos') for v in receipts] if s['voice'] else None
     if s['voice']:
-        intermediate,intermediate_report=encode_with_phase_retry(config,draft,voice_master,timeline,wavs,d/'voice-intermediate','voice',cancel,eos_receipts,receipts,frozen_pcm,engine)
+        intermediate,intermediate_report=encode_with_phase_retry(config,draft,voice_master,timeline,wavs,d/'voice-intermediate','voice',cancel,eos_receipts,receipts,frozen_pcm,engine,**gap_kw)
         _assert_voice_sources(wavs,receipts)
         (d/'voice-intermediate-report.json').write_text(json.dumps(intermediate_report,ensure_ascii=False),encoding='utf8')
     mix_fit=None
@@ -314,11 +323,12 @@ def render_job(job,config,jobdir,cancel=None,progress=None):
     else:master=voice_master;mode='voice' if s['voice'] else 'silent'
     if mode=='silent':
         final=d/'final.mp4';shutil.copyfile(draft,final);report=verify_media(final,config.ffmpeg,config.ffprobe,timeline,None,None,'silent',cancel,config.max_stage_seconds)
-    else:final,report=encode_with_phase_retry(config,draft,master,timeline,wavs if s['voice'] else None,d/'final-codec',mode,cancel,eos_receipts,receipts if s['voice'] else None,frozen_pcm if s['voice'] else None,engine)
+    else:final,report=encode_with_phase_retry(config,draft,master,timeline,wavs if s['voice'] else None,d/'final-codec',mode,cancel,eos_receipts,receipts if s['voice'] else None,frozen_pcm if s['voice'] else None,engine,**gap_kw)
     if s['voice']:
         _assert_voice_sources(wavs,receipts)
     report['timeline']=timeline;report['source_index_id']=job['index_id'];report['input_sha256']=job['input_sha256'];report['voice_wav_sha256']=[v['sha256'] for v in receipts];report['bgm_sha256']=job.get('bgm_sha256');report['eos_receipts']=eos_receipts;report['voice_engine']=engine;report['voice_completion']='natural_stop' if s['voice'] else 'not_applicable'
     report['speed']=s.get('speed',1.0)
+    if 'sentence_gap_seconds' in s:report['sentence_gap_seconds']=s.get('sentence_gap_seconds')
     if mix_fit:report['mix_fit']=mix_fit
     report['shot_usage']=shot_usage(timeline)
     if job.get('selection_context'):report['selection_context']=copy.deepcopy(job['selection_context'])

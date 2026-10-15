@@ -97,6 +97,7 @@ details.adv .advgrid{padding:2px 2px 12px}
 .settings-row .slider-label{display:flex;align-items:center;gap:8px}
 .settings-row input[type=range]{width:130px;accent-color:var(--blue)}
 #speedVal{min-width:38px;display:inline-block;font-weight:700;color:#1d4ed8}
+#sentenceGap{width:78px}
 #target{width:74px;border:1px solid #d9e0ea;border-radius:6px;padding:6px 8px;font-size:12px}
 .estline{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:0 0 12px}
 .chip{display:inline-block;background:#eef2f8;color:#3a4757;border-radius:14px;padding:5px 12px;font-size:12px}

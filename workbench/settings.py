@@ -1,6 +1,7 @@
 from dataclasses import dataclass,asdict
 from pathlib import Path
 from typing import Optional
+import math
 from .voice_engines import is_clone_voice_id
 
 _DEDUP={'off','light','double'}
@@ -40,7 +41,7 @@ def _check_cover(v):
 
 @dataclass(frozen=True)
 class ProductionSettings:
-    voice:bool=False;speaker:str='Serena';voice_engine:str='qwen';vox_voice:str='natural_female';subtitles:bool=True;subtitle_size:int=54;subtitle_bottom:int=380;subtitle_border:int=3;bgm:bool=False;bgm_path:str='';bgm_volume:float=0.20;dedup:str='off';beauty:bool=False;beauty_strength:float=0.25;visual_filter:str='original';visual_filter_strength:float=0.35;speed:float=1.0;target_seconds:int=0;shot_reuse:int=1;cover:Optional[dict]=None;intro:Optional[dict]=None;outro:Optional[dict]=None;width:int=1080;height:int=1920;fps:int=30;codec:str='h264'
+    voice:bool=False;speaker:str='Serena';voice_engine:str='qwen';vox_voice:str='natural_female';subtitles:bool=True;subtitle_size:int=54;subtitle_bottom:int=380;subtitle_border:int=3;bgm:bool=False;bgm_path:str='';bgm_volume:float=0.20;dedup:str='off';beauty:bool=False;beauty_strength:float=0.25;visual_filter:str='original';visual_filter_strength:float=0.35;speed:float=1.0;sentence_gap_seconds:Optional[float]=None;target_seconds:int=0;shot_reuse:int=1;cover:Optional[dict]=None;intro:Optional[dict]=None;outro:Optional[dict]=None;width:int=1080;height:int=1920;fps:int=30;codec:str='h264'
     @classmethod
     def from_dict(cls,d):
         if set(d)-set(cls.__dataclass_fields__):raise ValueError('unknown production setting')
@@ -64,6 +65,10 @@ class ProductionSettings:
         if type(self.bgm_volume) not in (int,float) or not 0<=self.bgm_volume<=1:raise ValueError('BGM 音量范围 0..1')
         if type(self.speed) not in (int,float):raise ValueError('speed must be numeric')
         if not 0.85-1e-9<=float(self.speed)<=1.5+1e-9:raise ValueError('语速需在 0.85–1.5 之间')
+        gap=self.sentence_gap_seconds
+        if gap is not None:
+            if type(gap) not in (int,float) or not math.isfinite(float(gap)) or not 0.10-1e-9<=float(gap)<=1.00+1e-9:
+                raise ValueError('句间停顿需为 0.10–1.00 秒的有限数字')
         if type(self.target_seconds) is not int or not 0<=self.target_seconds<=3600:raise ValueError('目标时长需为 0–3600 秒的整数（0 表示不设）')
         if type(self.shot_reuse) is not int or self.shot_reuse not in (0,1,2,3):raise ValueError('镜头重复上限需为 0/1/2/3（0 表示不限）')
         if self.cover is not None:_check_cover(self.cover)

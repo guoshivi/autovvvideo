@@ -1,6 +1,7 @@
 """Sentence pacing and deterministic WAV edge trimming helpers."""
 from pathlib import Path
 import wave
+import math
 
 import numpy as np
 
@@ -28,6 +29,22 @@ def estimate_slot_seconds(chars: int, cps: float) -> float:
     if cps <= 0:
         raise ValueError("cps must be positive")
     return voice_slot_seconds(float(chars) / cps)
+
+
+def sentence_slot_seconds(voice_seconds: float, sentence_gap_seconds=None, *, is_last=False) -> float:
+    """Return one sentence's slot, preserving the legacy final tail pad.
+
+    ``None`` keeps the established automatic 0.18–0.35 second rhythm.  An
+    explicit gap applies only before a following sentence; the final sentence
+    retains the old tail padding so a manual setting cannot add dead air at
+    the end of a film.
+    """
+    if sentence_gap_seconds is None or is_last:
+        return voice_slot_seconds(voice_seconds)
+    gap=float(sentence_gap_seconds)
+    if not math.isfinite(gap) or not 0.10-1e-9<=gap<=1.00+1e-9:
+        raise ValueError('sentence gap must be 0.10..1.00 seconds')
+    return float(voice_seconds)+gap
 
 
 def _trim_error():
