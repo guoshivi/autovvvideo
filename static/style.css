@@ -109,6 +109,16 @@ details.adv .advgrid{padding:2px 2px 12px}
 .copylist{display:grid;gap:6px;margin:8px 0 4px}
 .copyrow{display:flex;justify-content:space-between;gap:10px;align-items:center;border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:12.5px}
 .copytext{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* Output selection belongs beside the results, not just the source controls. */
+.results-head{display:flex;flex-wrap:wrap;align-items:flex-start;gap:12px 18px;margin-bottom:14px}
+.results-head h3{flex:none;margin:10px 0 0}
+.results-output{flex:1 1 300px;min-width:0;background:#f6f8fb;border:1px solid var(--line);border-radius:8px;padding:6px 10px}
+.results-output-line{display:flex;align-items:center;gap:10px;min-width:0}
+.results-output-label{flex:none;font-size:12px;color:#637087}
+.results-output-path{flex:1;min-width:0;overflow-wrap:anywhere;font-size:12px;line-height:1.5;color:#3a4757}
+.results-output-line button{flex:none;min-height:44px;font-size:12px;white-space:nowrap}
+.results-output-line button:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+.results-output-hint{margin:2px 0 4px;font-size:11px;line-height:1.5;color:#637087;overflow-wrap:anywhere}
 .daygroup{margin:0 0 10px}
 .pager{display:flex;align-items:center;gap:10px;margin:0 0 10px;flex-wrap:wrap}
 .pager .pageno{color:#475569;font-weight:650}
