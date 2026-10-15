@@ -7,6 +7,7 @@ part of every immutable request.
 from __future__ import annotations
 
 import hashlib
+import os
 import stat
 import uuid
 from pathlib import Path
@@ -52,10 +53,62 @@ def validate_engine(value: object) -> str:
     return value
 
 
-def validate_vox_voice(value: object) -> str:
-    if not isinstance(value, str) or value not in VOX_PRESETS:
-        raise VoiceEngineError("Vox 声音预设不可用，请重新选择")
-    return value
+CLONE_VOICE_EXTS = (".wav", ".mp3", ".flac", ".ogg", ".m4a", ".aac")
+
+
+def is_clone_voice_id(value: object) -> bool:
+    """Whether a name may identify a dropped clone voice (file-stem rules)."""
+    if not isinstance(value, str) or not value or value != value.strip() or len(value) > 80:
+        return False
+    if value in (".", "..") or value.startswith(".") or value[-1] in (" ", "."):
+        return False
+    if any(c in value for c in '\\/:*?"<>|') or any(ord(c) < 32 for c in value):
+        return False
+    return True
+
+
+def _clone_files(clone_dir) -> dict:
+    d = Path(clone_dir); found = {}
+    try:
+        names = sorted(os.listdir(d))
+    except OSError:
+        return found
+    for name in names:
+        try:
+            st = (d / name).lstat()
+        except OSError:
+            continue
+        if stat.S_ISLNK(st.st_mode) or getattr(st, "st_file_attributes", 0) & 0x400 or not stat.S_ISREG(st.st_mode):
+            continue
+        stem, ext = os.path.splitext(name); ext = ext.lower()
+        if ext not in CLONE_VOICE_EXTS or not is_clone_voice_id(stem) or stem in VOX_PRESETS:
+            continue
+        prio = CLONE_VOICE_EXTS.index(ext)
+        if stem not in found or prio < found[stem][0]:
+            found[stem] = (prio, name, int(st.st_size))
+    return found
+
+
+def list_clone_voices(clone_dir) -> list:
+    """Dropped clone voices as [{id,label,file,bytes}]; shadow files of built-in names are skipped."""
+    return [{"id": stem, "label": stem, "file": row[1], "bytes": row[2]}
+            for stem, row in sorted(_clone_files(clone_dir).items(), key=lambda kv: kv[0].casefold())]
+
+
+def resolve_clone_voice(clone_dir, voice_id):
+    """Path of the dropped audio for a clone id, or None (built-ins never match)."""
+    if clone_dir is None or not is_clone_voice_id(voice_id) or voice_id in VOX_PRESETS:
+        return None
+    row = _clone_files(clone_dir).get(voice_id)
+    return (Path(clone_dir) / row[1]) if row else None
+
+
+def validate_vox_voice(value: object, clone_dir=None) -> str:
+    if isinstance(value, str) and value in VOX_PRESETS:
+        return value
+    if clone_dir is not None and isinstance(value, str) and resolve_clone_voice(clone_dir, value) is not None:
+        return value
+    raise VoiceEngineError("Vox 声音不可用：请选内置声音，或把音频放进克隆文件夹后刷新列表")
 
 
 def preset(voice: object) -> dict:
@@ -101,7 +154,7 @@ def require_qwen_config(cfg) -> tuple[Path, Path]:
     return Path(py), Path(model)
 
 
-def validate_preview_payload(body: object) -> dict:
+def validate_preview_payload(body: object, clone_dir=None) -> dict:
     if not isinstance(body, dict):
         raise VoiceEngineError("预览请求格式无效")
     if set(body) - {"engine", "voice", "text", "speed"}:
@@ -109,7 +162,7 @@ def validate_preview_payload(body: object) -> dict:
     engine = validate_engine(body.get("engine", "qwen"))
     voice = body.get("voice", "natural_female" if engine == "vox" else "Serena")
     if engine == "vox":
-        voice = validate_vox_voice(voice)
+        voice = validate_vox_voice(voice, clone_dir)
     elif not isinstance(voice, str) or voice not in QWEN_SPEAKERS:
         raise VoiceEngineError("Qwen 说话人无效")
     text = body.get("text", "")

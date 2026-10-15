@@ -102,7 +102,7 @@ def test_preview_untrusted_errors_are_fixed_even_for_allowlisted_text(svc, kind,
 
 @pytest.mark.parametrize('body,expected', [
     ({'engine': 'other'}, ENGINE_ERROR),
-    ({'engine': 'vox', 'voice': 'other'}, 'Vox 声音预设不可用，请重新选择'),
+    ({'engine': 'vox', 'voice': 'other'}, 'Vox 声音不可用：请选内置声音，或把音频放进克隆文件夹后刷新列表'),
     ({'engine': 'qwen', 'voice': 'other'}, 'Qwen 说话人无效'),
     ({'speed': True}, '语速需在 0.85–1.5 之间'),
     ({'text': []}, '预览文字无效'),

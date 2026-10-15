@@ -21,7 +21,8 @@ import numpy as np
 
 from .browser import reject_links
 from .tts_worker import apply_speed_wav, _normalize_loudness
-from .voice_engines import VoiceEngineError, anchor_metadata, preset, validate_vox_voice
+from .voice_engines import (VoiceEngineError, VOX_PRESETS, anchor_metadata, preset,
+                            resolve_clone_voice, validate_vox_voice)
 
 
 MODEL_REVISION = "32279effe8c19989596f05d353d1447f51d9e915"
@@ -239,9 +240,44 @@ def _write_anchor(cache_root, voice, model, model_obj, observer, ffmpeg):
     return target, meta
 
 
+def _prepare_clone_reference(src: Path, cache_root: Path, ffmpeg: str) -> Path:
+    """Reference WAV for a dropped clone voice.
+
+    True WAV files are used as-is (bytes never modified).  Other formats are
+    transcoded once into the cache, keyed by the source bytes, so the model
+    always sees a plain mono PCM WAV and the dropped file stays untouched.
+    """
+    if src.suffix.lower() == ".wav":
+        return src
+    digest = hashlib.sha256(src.read_bytes()).hexdigest()[:16]
+    folder = cache_root / "_imports"; folder.mkdir(parents=True, exist_ok=True); reject_links(folder)
+    dest = folder / f"{src.stem}-{digest}.wav"
+    if dest.is_file():
+        return dest
+    tmp = dest.with_name(dest.name + ".tmp.wav")
+    try:
+        cmd = [str(ffmpeg), "-nostdin", "-y", "-v", "error", "-i", str(src),
+               "-ar", "24000", "-ac", "1", "-c:a", "pcm_s16le", str(tmp)]
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        if r.returncode or not tmp.is_file():
+            raise RuntimeError("克隆音频转码失败：" + (r.stderr or "")[-240:])
+        _check_pcm16(tmp)
+        os.replace(tmp, dest)
+        return dest
+    finally:
+        try: tmp.unlink()
+        except OSError: pass
+
+
+def _clone_seed(voice: str) -> int:
+    return int(hashlib.sha256(("clone:" + voice).encode("utf8")).hexdigest()[:8], 16)
+
+
 def synthesize(request: dict, out_dir: str | Path, *, model_factory=None) -> dict:
     out = Path(out_dir); out.mkdir(parents=True, exist_ok=True); reject_links(out)
-    voice = validate_vox_voice(request.get("voice", request.get("vox_voice")))
+    clone_dir_raw = str(request.get("vox_clone_dir") or "").strip()
+    clone_dir = Path(clone_dir_raw) if clone_dir_raw else None
+    voice = validate_vox_voice(request.get("voice", request.get("vox_voice")), clone_dir)
     lines = request.get("lines") or [request.get("text", "")]
     if not isinstance(lines, list) or not lines or any(not isinstance(x, str) or not x.strip() for x in lines):
         raise VoiceEngineError("Vox 配音文字为空")
@@ -257,16 +293,27 @@ def synthesize(request: dict, out_dir: str | Path, *, model_factory=None) -> dic
     factory = model_factory or (lambda: _model_factory(model_path))
     model = factory(); observer = VoxStopObserver(); observer.install(model)
     try:
-        anchor = _validate_anchor(cache_root, voice, model_path)
-        anchor_created = anchor is None
-        if anchor is None:
-            anchor = _write_anchor(cache_root, voice, model_path, model, observer, ffmpeg)
-        anchor_wav, anchor_meta = anchor
+        if voice in VOX_PRESETS:
+            anchor = _validate_anchor(cache_root, voice, model_path)
+            anchor_created = anchor is None
+            if anchor is None:
+                anchor = _write_anchor(cache_root, voice, model_path, model, observer, ffmpeg)
+            reference_wav, anchor_meta = anchor
+        else:
+            clone_src = resolve_clone_voice(clone_dir, voice)
+            if clone_src is None:
+                raise VoiceEngineError("Vox 克隆音色不可用：请把音频放进克隆文件夹后刷新列表")
+            reference_wav = _prepare_clone_reference(clone_src, cache_root, ffmpeg)
+            anchor_meta = {"engine": "vox", "preset": voice, "kind": "clone",
+                           "seed": _clone_seed(voice), "source_file": clone_src.name,
+                           "source_sha256": hashlib.sha256(clone_src.read_bytes()).hexdigest(),
+                           "reference": str(reference_wav)}
+            anchor_created = False
         result = {"success": False, "engine": "vox", "preset": voice, "completion": "natural_stop", "anchor": anchor_meta, "anchor_cold_start": anchor_created, "voices": [], "speed": speed}
         for i, line in enumerate(lines):
             before = len(observer.invocations)
             _seed_all(anchor_meta["seed"])
-            generated = model.generate(text=line, reference_wav_path=str(anchor_wav), normalize=False, denoise=False)
+            generated = model.generate(text=line, reference_wav_path=str(reference_wav), normalize=False, denoise=False)
             stop = observer.final()
             attempts = observer.invocations[before:]
             if not attempts:

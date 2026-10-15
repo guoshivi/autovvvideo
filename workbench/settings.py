@@ -1,6 +1,7 @@
 from dataclasses import dataclass,asdict
 from pathlib import Path
 from typing import Optional
+from .voice_engines import is_clone_voice_id
 
 _DEDUP={'off','light','double'}
 _SPEAKERS={'Serena','Vivian','Uncle_Fu'}
@@ -49,7 +50,7 @@ class ProductionSettings:
             if type(getattr(self,k)) is not bool:raise ValueError(f'{k} must be boolean')
         if not isinstance(self.speaker,str) or self.speaker not in _SPEAKERS:raise ValueError('speaker must be Serena, Vivian or Uncle_Fu')
         if not isinstance(self.voice_engine,str) or self.voice_engine not in _VOICE_ENGINES:raise ValueError('voice_engine must be qwen or vox')
-        if not isinstance(self.vox_voice,str) or self.vox_voice not in _VOX_VOICES:raise ValueError('vox_voice must be a supported preset')
+        if not isinstance(self.vox_voice,str) or not (self.vox_voice in _VOX_VOICES or is_clone_voice_id(self.vox_voice)):raise ValueError('vox_voice must be a built-in preset or a clone folder name')
         if self.bgm and (not self.bgm_path or not Path(self.bgm_path).is_file()):raise ValueError('BGM 文件不存在')
         if self.dedup not in _DEDUP:raise ValueError('dedup must be off/light/double')
         if self.visual_filter not in _VISUAL_FILTERS:raise ValueError('visual_filter must be original/clear/warm/cinema')

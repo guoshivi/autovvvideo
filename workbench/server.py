@@ -102,7 +102,7 @@ class WorkbenchHandler(BaseHTTPRequestHandler):
             # messages raised at these controlled validation sites are public.
             controlled={
                 '配音引擎只能选择 Qwen（原配音）或 Vox（新配音·试用）',
-                'Vox 声音预设不可用，请重新选择', 'Qwen 说话人无效',
+                'Vox 声音不可用：请选内置声音，或把音频放进克隆文件夹后刷新列表', 'Qwen 说话人无效',
                 '预览请求格式无效', '预览请求只支持引擎、声音、文字和语速',
                 '预览文字无效', '语速需在 0.85–1.5 之间',
                 'Vox 试用环境未安装，请先运行可选的 install-vox.ps1',
@@ -154,6 +154,7 @@ class WorkbenchHandler(BaseHTTPRequestHandler):
                     roots.append({'id':i,'name':tail,'path':str(r)})
                 return self._json(roots)
             if u.path=='/api/ai-settings':return self._json(svc.ai_settings())
+            if u.path=='/api/vox-voices':return self._json(svc.vox_voices())
             if u.path.startswith('/api/voice-preview/'):
                 pid=u.path.rsplit('/',1)[-1];p,meta=svc.preview_audio(pid,(q.get('sha256') or [None])[0])
                 # Hash and length are checked on the exact immutable bytes

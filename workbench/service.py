@@ -16,8 +16,8 @@ from .media import sha256
 from .fs_authority import lexical_under, AuthorityError, capture_lease
 from .process import run_owned,Cancelled
 from .queue import CommitError as QueueCommitError
-from .voice_engines import (VoiceEngineError, require_vox_config, require_qwen_config,
-                            validate_preview_payload, opaque_preview_id)
+from .voice_engines import (VoiceEngineError, VOX_PRESETS, require_vox_config, require_qwen_config,
+                            list_clone_voices, resolve_clone_voice, validate_preview_payload, opaque_preview_id)
 
 class ServiceError(ValueError):pass
 def _render_dest_name(product,job_input,job_id):
@@ -376,6 +376,9 @@ class WorkbenchService:
         if early.get('voice') and early.get('voice_engine','qwen')=='vox':
             try: require_vox_config(self.cfg)
             except VoiceEngineError as e: raise ServiceError(str(e)) from e
+            vv=early.get('vox_voice','natural_female')
+            if vv not in VOX_PRESETS and resolve_clone_voice(self._vox_clone_dir(), vv) is None:
+                raise ServiceError(f'没找到克隆音色「{vv}」：请把音频放进 {self._vox_clone_dir()} 后刷新列表')
         p,rec=self._ready_index(pid)
         if not p['output']:raise ServiceError('select output folder')
         if p['archived']:raise ServiceError('archived product')
@@ -455,6 +458,13 @@ class WorkbenchService:
             # Diagnostics must never mask the original preview failure.
             pass
 
+    def _vox_clone_dir(self):
+        return Path(self.cfg.project_src) / 'voices'
+    def vox_voices(self):
+        d = self._vox_clone_dir()
+        return {'dir': str(d),
+                'presets': [{'id': k, 'label': v['label']} for k, v in VOX_PRESETS.items()],
+                'clones': list_clone_voices(d)}
     def preview_voice(self, body):
         if not self._preview_generation_lock.acquire(blocking=False):
             raise ServiceError('已有试听正在生成，请等它完成后再试')
@@ -464,7 +474,7 @@ class WorkbenchService:
             self._preview_generation_lock.release()
 
     def _preview_voice(self, body):
-        try: req=validate_preview_payload(body)
+        try: req=validate_preview_payload(body, self._vox_clone_dir())
         except VoiceEngineError as e: raise ServiceError(str(e)) from e
         engine=req['engine']
         if engine=='vox':
@@ -477,7 +487,7 @@ class WorkbenchService:
         try:
             request={'lines':[req['text']],'speed':req['speed']}
             if engine=='qwen': request.update({'speaker':req['voice'],'tts_model':self.cfg.tts_model,'ffmpeg':self.cfg.ffmpeg})
-            else: request.update({'voice':req['voice']})
+            else: request.update({'voice':req['voice'], 'vox_clone_dir':str(self._vox_clone_dir())})
             receipt=self._run_voice_request(engine,request,d,cancel=self.stop_flag.is_set)
             row=receipt['voices'][0]
             if row.get('file')!='voice_000.wav':raise ServiceError('预览音频身份无效')
@@ -793,7 +803,7 @@ class WorkbenchService:
             engine=x['settings'].get('voice_engine','qwen')
             if engine=='vox':
                 self.queue.update(jid,stage='voice',progress=5)
-                receipt=self._run_voice_request('vox',{'lines':x['lines'],'voice':x['settings'].get('vox_voice','natural_female'),'speed':speed},d,cancel)
+                receipt=self._run_voice_request('vox',{'lines':x['lines'],'voice':x['settings'].get('vox_voice','natural_female'),'speed':speed,'vox_clone_dir':str(self._vox_clone_dir())},d,cancel)
             else:
                 # Keep the original Qwen process/module invocation intact.
                 req=d/'voice-request.json';req.write_text(json.dumps({'lines':x['lines'],'speaker':x['settings']['speaker'],'tts_model':self.cfg.tts_model,'speed':speed,'ffmpeg':self.cfg.ffmpeg},ensure_ascii=False),encoding='utf8')
