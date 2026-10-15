@@ -14,6 +14,7 @@ Two mechanisms keep films from re-using the same shots:
 
 import hashlib
 import math
+from .pacing import estimate_slot_seconds,voice_slot_seconds
 
 def _key(c):
     return (c.get('path'), float(c.get('start') or 0))
@@ -93,8 +94,8 @@ def prefix_plan(mapping, lines, settings, voices=None, seconds=15):
     elapsed=0;out=[]
     for i,(line,row) in enumerate(zip(lines,mapping)):
         if elapsed>=seconds:break
-        if voices and i<len(voices):want=max(2.0,float(voices[i])/24000+.30)
-        elif settings.get('voice'):want=max(2.0,len(line)/(4.0*float(settings.get('speed') or 1))+.30)
+        if voices and i<len(voices):want=voice_slot_seconds(float(voices[i])/24000)
+        elif settings.get('voice'):want=estimate_slot_seconds(len(line),4.0*float(settings.get('speed') or 1))
         else:want=max(2.0,min(8,max(1.8,len(line)/5)))
         remaining=math.ceil(want*30);picker=selector.new_sentence(row)
         while remaining>0 and elapsed<seconds and row:

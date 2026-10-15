@@ -2,6 +2,7 @@
 import sys,json,time,wave,hashlib,traceback,os,subprocess
 from pathlib import Path
 import numpy as np
+from .pacing import trim_wav_edges
 
 def _denoise_floor(arr, threshold=12):
     """Zero out sub-quantization-floor dither (<= threshold LSB ~ -68dBFS) so that
@@ -169,6 +170,10 @@ def main():
             if abs(speed-1.0)>1e-9:samples=apply_speed_wav(ffmpeg,p,speed)
             result['voices'].append({'index':i,'file':p.name,'samples':samples,'sha256':hashlib.sha256(p.read_bytes()).hexdigest(),'eos':current[0]})
         _normalize_loudness(ffmpeg,out,result)
+        for v in result['voices']:
+            samples=trim_wav_edges(out/v['file'])
+            v['samples']=samples
+            v['sha256']=hashlib.sha256((out/v['file']).read_bytes()).hexdigest()
         result['speed']=speed
         result['success']=True
     except Exception as e:result.update(error=str(e),traceback=traceback.format_exc())

@@ -7,6 +7,7 @@ from .verify import verify_media,read_wav,VerificationFailure
 from .process import run_owned,Cancelled
 from .browser import reject_links,overlaps
 from .selection import VariantSelector,shot_usage
+from .pacing import SENTENCE_GAP_SECONDS,voice_slot_seconds
 from reference.core.videopipe.caption import drawtext_filter,wrap_caption
 from .filters import ffmpeg_filter
 
@@ -109,10 +110,9 @@ def render_video(job,config,jobdir,cancel=None,progress=None,_voice_binding=None
         vpcm=bound[i][2] if wav else []
         if wav:
             vpcm=bound[i][2]
-            # Rhythm: a sentence slot lasts just past its voice (gaps ~0.30s,
-            # close to 跑量视频's near-continuous 0.2–0.3s pauses) instead of a
-            # fixed 4s floor that left ~2.5s of dead air after every line.
-            voice_wavs.append(wav);want=max(2.0,len(vpcm)/24000+.30)
+            # Rhythm: reserve the measured voice plus SENTENCE_GAP_SECONDS; the
+            # shared slot rule keeps short lines readable without long dead air.
+            voice_wavs.append(wav);want=voice_slot_seconds(len(vpcm)/24000)
         else:want=max(2.0,min(8,max(1.8,len(line)/5)))
         frames=math.ceil(want*30);required=frames/30;cap=None
         if s['subtitles']:
@@ -175,7 +175,9 @@ def render_video(job,config,jobdir,cancel=None,progress=None,_voice_binding=None
         slack=frames-segment_frames
         if slack<0 or slack>3:raise ValueError(f'render/frames sentence={i} measured={segment_frames} required={frames}')
         start_time=total_frames/30;total_frames+=segment_frames;end_time=total_frames/30
-        if wav and end_time-start_time<len(vpcm)/24000+.20:raise ValueError(f'render/voice margin sentence={i}')
+        # ceil-to-30fps plus a possible three-frame sliver leaves at least ~.08s;
+        # .07s is the conservative guard against clipping or overlap.
+        if wav and end_time-start_time<len(vpcm)/24000+.07:raise ValueError(f'render/voice margin sentence={i}')
         shortage=len({(c.get('source_sha256'),round(float(c.get('start') or 0),1)) for c in chosen})<len(chosen)
         timeline.append({'index':i,'start':start_time,'end':end_time,'voice_samples':len(vpcm) if wav else 0,'segments':[p.name for p in local],'sources':chosen,'cuts':cuts,'selection_warning':'candidate_shortage/cap_overrun' if shortage else None})
         if progress:progress(i+1,len(lines))

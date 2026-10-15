@@ -21,6 +21,7 @@ import numpy as np
 
 from .browser import reject_links
 from .tts_worker import apply_speed_wav, _normalize_loudness
+from .pacing import trim_wav_edges
 from .voice_engines import (VoiceEngineError, VOX_PRESETS, anchor_metadata, preset,
                             resolve_clone_voice, validate_vox_voice)
 
@@ -327,6 +328,7 @@ def synthesize(request: dict, out_dir: str | Path, *, model_factory=None) -> dic
             receipt = {"voices": [{"file": dest.name, "samples": 0, "sha256": ""}]}
             _normalize_loudness(ffmpeg, out, receipt)
             if receipt.get("loudness_warning"): raise RuntimeError("Vox 音量归一化失败：" + receipt["loudness_warning"])
+            trim_wav_edges(dest)
             samples = _check_pcm16(dest)
             if samples <= 0: raise RuntimeError(f"Vox 输出为空：sentence={i}")
             result["voices"].append({"index": i, "file": dest.name, "samples": samples, "sha256": hashlib.sha256(dest.read_bytes()).hexdigest(), "eos": {"engine": "vox", "natural_stop": True, "observed_natural_stop": True, "min_len": stop["min_len"], "max_len": stop["max_len"], "executed": stop["executed"], "last_stop_flag": stop["last_stop_flag"], "limit_exhausted": False, "attempts": len(attempts)}, "completion": "natural_stop"})

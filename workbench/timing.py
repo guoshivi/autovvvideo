@@ -1,6 +1,7 @@
 """Measured script-to-duration planning helpers."""
 from dataclasses import dataclass,asdict
 import math
+from .pacing import estimate_slot_seconds
 
 @dataclass(frozen=True)
 class TimingEstimate:
@@ -71,7 +72,7 @@ def estimate_timing(lines,index_record,*,speed=1.0,receipts=None,default_cps=4.0
     # exist.  For the estimate fallback, adjust the neutral 4 cps baseline.
     if not calibrated:cps=max(1.0,min(8.0,float(default_cps)*speed))
     settings=settings or {}
-    if settings.get('voice',True):seconds=sum(math.ceil(max(2.0,len(line)/cps+.30)*30)/30 for line in lines)
+    if settings.get('voice',True):seconds=sum(math.ceil(estimate_slot_seconds(len(line),cps)*30)/30 for line in lines)
     else:seconds=sum(math.ceil(max(2.0,min(8,max(1.8,len(line)/5)))*30)/30 for line in lines)
     seconds+=sum(float((settings.get(k) or {}).get('seconds') or 0) for k in ('intro','outro'))
     covered=min(len(windows),len(lines))
