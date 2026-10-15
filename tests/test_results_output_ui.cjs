@@ -1,4 +1,7 @@
 // Run: node --test tests/test_results_output_ui.cjs (no extra dependencies).
+// The output folder setting must appear exactly once — beside 素材/索引 — and the
+// results section must stay free of a duplicated output entry; the existing
+// folder picker + save chain stays wired for the single remaining entry.
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const fs=require('node:fs');
@@ -14,48 +17,63 @@ function fixture(product={id:'product-a',name:'Example',output:{path:'D:\\Export
   vm.runInContext('state.product=fixtureProduct;state.jobs=[];renderResults()',ctx);
   return {ctx,nodes,html:()=>nodes['#secResults'].innerHTML};
 }
-test('results header exposes the current output and existing folder picker',()=>{
+test('results section keeps a plain header without duplicating the output entry',()=>{
   const f=fixture();
-  assert.match(f.html(),/class="results-head"/);
-  assert.match(f.html(),/id="resultsOutputPath"/);
-  assert.match(f.html(),/D:\\Exports/);
-  assert.match(f.html(),/id="resultsOutputChoose"[^>]*onclick="openPicker\('output'\)"/);
-  assert.match(f.html(),/保存到/);
-  assert.match(f.html(),/仅影响新任务/);
-  assert.match(f.html(),/商品名 \/ 年月日 \/ 商品名 序号\.mp4/);
+  const html=f.html();
+  assert.match(html,/完成后可播放 \/ 下载/);
+  assert.match(html,/还没有成片/);
+  assert.doesNotMatch(html,/results-head|results-output|resultsOutputChoose|保存到|仅影响新任务/);
 });
-test('folder picker remains discoverable before the first completed video',()=>{
-  const f=fixture();assert.match(f.html(),/还没有成片/);assert.match(f.html(),/>更改<\/button>/);
+test('no product shows the placeholder and no output control',()=>{
+  const f=fixture(null);
+  assert.match(f.html(),/选择商品后显示/);
+  assert.doesNotMatch(f.html(),/resultsOutputChoose/);
 });
-test('unselected output offers a clear choice rather than claiming a default',()=>{
-  const f=fixture({id:'a',name:'A'});assert.match(f.html(),/未选择/);assert.match(f.html(),/>选择文件夹<\/button>/);
+test('materials area exposes the single output row with the folder picker',()=>{
+  const f=fixture();
+  vm.runInContext('refreshIdxState=async()=>{};renderMaterials()',f.ctx);
+  const html=f.nodes['#secMaterials'].innerHTML;
+  assert.match(html,/<span class="plabel">素材<\/span>/);
+  assert.match(html,/<span class="plabel">输出<\/span>/);
+  assert.match(html,/openPicker\('output'\)/);
+  assert.match(html,/D:\\Exports/);
 });
-test('no product does not expose an actionable save control',()=>{
-  const f=fixture(null);assert.match(f.html(),/选择商品后显示/);assert.doesNotMatch(f.html(),/resultsOutputChoose/);
-});
-test('UNC and HTML metacharacters are escaped in text and tooltip',()=>{
+test('UNC and HTML metacharacters are escaped in the materials path chip',()=>{
   const f=fixture({id:'a',name:'A',output:{path:'\\\\server\\share\\<img src=x onerror=alert(1)>"&'}});
-  assert.doesNotMatch(f.html(),/<img src=x/);assert.match(f.html(),/\\\\server\\share/);
-  assert.match(f.html(),/&lt;img src=x onerror=alert\(1\)&gt;&quot;&amp;/);
+  vm.runInContext('refreshIdxState=async()=>{};renderMaterials()',f.ctx);
+  const html=f.nodes['#secMaterials'].innerHTML;
+  assert.doesNotMatch(html,/<img src=x/);
+  assert.match(html,/\\\\server\\share/);
+  assert.match(html,/&lt;img src=x onerror=alert\(1\)&gt;&quot;&amp;/);
 });
-test('changing selected product refreshes the result path',()=>{
-  const f=fixture();vm.runInContext("state.product={id:'b',name:'B',output:{path:'E:/Other'}};renderResults()",f.ctx);
-  assert.match(f.html(),/E:\/Other/);assert.doesNotMatch(f.html(),/D:\\Exports/);
+test('changing selected product refreshes the materials path',()=>{
+  const f=fixture();
+  vm.runInContext('refreshIdxState=async()=>{};renderMaterials()',f.ctx);
+  assert.match(f.nodes['#secMaterials'].innerHTML,/D:\\Exports/);
+  vm.runInContext("state.product={id:'b',name:'B',output:{path:'E:/Other'}};renderMaterials()",f.ctx);
+  const html=f.nodes['#secMaterials'].innerHTML;
+  assert.match(html,/E:\/Other/);
+  assert.doesNotMatch(html,/D:\\Exports/);
 });
-test('completed cards and result links remain intact',()=>{
-  const f=fixture();vm.runInContext("state.jobs=[{id:'job-a',status:'done',artifact:{},lines_count:1,script_summary:'Example',variant:1,finished_at:1700000000}];renderResults()",f.ctx);
-  assert.match(f.html(),/class="daygroup"/);assert.match(f.html(),/\/api\/results\/job-a\?product_id=product-a/);
-  assert.match(f.html(),/>播放<\/a>/);assert.match(f.html(),/>下载<\/a>/);assert.match(f.html(),/resultsOutputChoose/);
-});
-test('both entries rerender together on the existing confirmed-save path',async()=>{
+test('confirmed folder pick saves through the existing output API and refreshes the page',async()=>{
   const f=fixture();
   vm.runInContext(`refreshIdxState=async()=>{};closePicker=()=>{state.picker=null};
     api=async(url,opt)=>{globalThis.savedRequest={url,body:JSON.parse(opt.body)};state.product.output={path:JSON.parse(opt.body).path}};
-    load=async()=>{await renderMaterials();renderResults()};
+    load=async()=>{await renderMaterials()};
     state.picker={role:'output',path:'E:/Selected'};`,f.ctx);
   await vm.runInContext('confirmPick()',f.ctx);
   assert.equal(f.ctx.savedRequest.url,'/api/products/product-a/output');
   assert.equal(f.ctx.savedRequest.body.path,'E:/Selected');
-  assert.match(f.html(),/E:\/Selected/);assert.match(f.nodes['#secMaterials'].innerHTML,/E:\/Selected/);
+  assert.match(f.nodes['#secMaterials'].innerHTML,/E:\/Selected/);
   assert.equal(vm.runInContext('state.picker',f.ctx),null);
+});
+test('completed cards and result links remain intact',()=>{
+  const f=fixture();
+  vm.runInContext("state.jobs=[{id:'job-a',status:'done',artifact:{},lines_count:1,script_summary:'Example',variant:1,finished_at:1700000000}];renderResults()",f.ctx);
+  const html=f.html();
+  assert.match(html,/class="daygroup"/);
+  assert.match(html,/\/api\/results\/job-a\?product_id=product-a/);
+  assert.match(html,/>播放<\/a>/);
+  assert.match(html,/>下载<\/a>/);
+  assert.doesNotMatch(html,/resultsOutputChoose/);
 });
