@@ -419,3 +419,126 @@ def export_validated(local_file,nas_root,job_id,report,authorization=None,cover_
                 st=stage.stat()
                 if (st.st_dev,st.st_ino)==stage_id:shutil.rmtree(stage)
             except OSError:pass
+
+def export_numbered(local_file,out_root,report,short_title,authorization=None,now=None):
+    from datetime import datetime
+    from .fs_authority import identity_chain,verify_lease,lexical_under,AuthorityError
+    class ExportCommitError(IOError):
+        def __init__(self,message,receipt=None):super().__init__(message);self.after_replace=True;self.receipt=receipt or {}
+    src=Path(local_file);got=validate_report(report,src);root=Path(out_root).absolute();reject_links(root)
+    if not root.is_dir():raise ValueError('export/output root missing')
+    if overlaps(src,root):raise ValueError('export/source-output overlap')
+    root_chain=identity_chain(root)
+    if authorization is not None:
+        if authorization.get('path') and Path(authorization['path']).absolute()!=root:raise ValueError('export selection path changed')
+        verify_lease(root,authorization.get('chain',()))
+    short=_safe_segment(short_title);t_dir=root/short;d_dir=t_dir/(now or datetime.now()).strftime('%Y%m%d')
+    parent=root;chain=root_chain
+    for child in (t_dir,d_dir):
+        verify_lease(parent,chain);lexical_under(child,root)
+        before=identity_chain(child) if child.exists() else None
+        child.mkdir(exist_ok=True)
+        verify_lease(parent,chain);lexical_under(child,root)
+        chain=verify_lease(child,before);parent=child
+    date_chain=chain
+    def check_chain():
+        lexical_under(d_dir,root);verify_lease(d_dir,date_chain)
+    def owned(path):
+        if stage_id is None or path is None:return False
+        try:
+            st=path.lstat();return (st.st_dev,st.st_ino)==stage_id
+        except OSError:return False
+    check_chain();n=_next_number(d_dir,short);check_chain()
+    # A short staging basename also accommodates eighty CJK characters in the
+    # final name without exceeding the filesystem's component byte limit.
+    stage=d_dir/f'.export-{uuid.uuid4().hex}.staging'
+    stage_id=None;published=False;dest=None;cleanup_fd=None;phase='publication verification failed'
+    try:
+        if os.name!='nt':
+            # Only cleanup needs a directory descriptor: after an ancestor swap
+            # it can remove our inode, never a file through the replacement path.
+            cleanup_fd=os.open(d_dir,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
+            st=os.fstat(cleanup_fd)
+            if (st.st_dev,st.st_ino)!=tuple(date_chain[0][1:3]):raise AuthorityError('export/date directory identity changed')
+        check_chain()
+        with stage.open('xb') as g:
+            st=os.fstat(g.fileno());stage_id=(st.st_dev,st.st_ino)
+            check_chain()
+            with src.open('rb') as f:shutil.copyfileobj(f,g,1024*1024)
+            check_chain();g.flush();os.fsync(g.fileno())
+        check_chain()
+        if not owned(stage):raise AuthorityError('export/staging identity changed')
+        if sha256(stage)!=got['sha256'] or stage.stat().st_size!=got['bytes']:raise ValueError('export/staging readback mismatch')
+        check_chain()
+        for _ in range(200):
+            check_chain()
+            if not owned(stage):raise AuthorityError('export/staging identity changed')
+            dest=d_dir/f'{short} {n}.mp4'
+            try:_nv_rename_file(stage,dest,d_dir,date_chain)
+            except OSError as e:
+                # A wrapper can raise after the syscall. Preserve that effect
+                # rather than retrying or claiming that nothing was published.
+                if getattr(e,'after_replace',False) or owned(dest):
+                    published=True;raise
+                check_chain()
+                if e.errno in (17,80,183) or getattr(e,'winerror',None) in (80,183):n+=1;continue
+                raise
+            published=True;break
+        else:raise FileExistsError('export/numbering collision retry limit reached')
+        phase='output authority changed';check_chain()
+        phase='final readback failed'
+        if not owned(dest) or sha256(dest)!=got['sha256'] or dest.stat().st_size!=got['bytes']:raise ValueError('export/final readback mismatch')
+        check_chain()
+        if not owned(dest):raise AuthorityError('export/final identity changed')
+        return dest,got
+    except Exception as e:
+        receipt={'stage':str(stage),'destination':str(dest) if dest else None,'sha256':got['sha256'],'bytes':got['bytes'],'stage_identity':stage_id}
+        if published or getattr(e,'after_replace',False) or owned(dest):
+            published=True
+            raise ExportCommitError('publication occurred but '+phase,receipt) from e
+        e.after_replace=False;e.receipt=receipt
+        raise
+    finally:
+        if stage_id is not None and not published:
+            try:
+                if cleanup_fd is not None:
+                    st=os.stat(stage.name,dir_fd=cleanup_fd,follow_symlinks=False)
+                    if (st.st_dev,st.st_ino)==stage_id:os.unlink(stage.name,dir_fd=cleanup_fd)
+                else:
+                    check_chain()
+                    if owned(stage):stage.unlink()
+            except (OSError,ValueError):pass
+        if cleanup_fd is not None:os.close(cleanup_fd)
+
+def _safe_segment(value):
+    import unicodedata
+    from .browser import _RESERVED
+    s=''.join(c for c in str(value or '') if c not in '\\/:*?"<>|' and unicodedata.category(c) not in ('Cc','Cf','Cs')).strip().strip(' .')
+    s=s[:80].rstrip(' .') or '视频'
+    if s.split('.')[0].rstrip(' ').upper() in _RESERVED|{'CONIN$','CONOUT$'}:s=('_'+s)[:80].rstrip(' .')
+    return s
+
+def _next_number(directory,short):
+    import re
+    pattern=re.compile(re.escape(short)+r' (\d+)\.mp4',re.IGNORECASE)
+    return max((int(m.group(1)) for p in directory.iterdir() if (m:=pattern.fullmatch(p.name))),default=0)+1
+
+def _nv_rename_file(stage,dest,root,expected_chain):
+    from .fs_authority import windows_noreplace,UnsupportedNative
+    if os.name=='nt':
+        return windows_noreplace(stage,dest,root,expected_chain)
+    if sys.platform=='darwin':
+        libc=ctypes.CDLL(None,use_errno=True);fn=getattr(libc,'renameatx_np',None)
+        if fn is None:raise UnsupportedNative('native no-replace rename unavailable')
+        fn.argtypes=[ctypes.c_int,ctypes.c_char_p,ctypes.c_int,ctypes.c_char_p,ctypes.c_uint];fn.restype=ctypes.c_int
+        if fn(-2,os.fsencode(str(stage)),-2,os.fsencode(str(dest)),4)!=0:
+            e=ctypes.get_errno();raise OSError(e,os.strerror(e),str(dest))
+        return
+    if sys.platform.startswith('linux'):
+        libc=ctypes.CDLL(None,use_errno=True);fn=getattr(libc,'renameat2',None)
+        if fn is None:raise UnsupportedNative('native no-replace rename unavailable')
+        fn.argtypes=[ctypes.c_int,ctypes.c_char_p,ctypes.c_int,ctypes.c_char_p,ctypes.c_uint];fn.restype=ctypes.c_int
+        if fn(-100,os.fsencode(str(stage)),-100,os.fsencode(str(dest)),1)!=0:
+            e=ctypes.get_errno();raise OSError(e,os.strerror(e),str(dest))
+        return
+    raise UnsupportedNative('native no-replace rename unsupported on this platform')

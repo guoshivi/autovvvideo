@@ -8,7 +8,7 @@ from .copybook import split_script
 from .copy_tools import clean_punctuation, parse_script_variants
 from .timing import estimate_timing
 from .indexer import Indexer,ProductionEmbedder,collect_source_fingerprints,expected_files_unchanged
-from .renderer import render_job,export_validated
+from .renderer import render_job,export_numbered
 from .selection import spread_candidates
 from .aicopy import run as ai_run,AIError
 from .ai_endpoint import normalize_endpoint
@@ -32,6 +32,14 @@ def _render_dest_name(product,job_input,job_id):
     t=_time.strftime('%m%d-%H%M%S')
     v=int(job_input.get('variant') or 0)
     return '_'.join([name]+([summary] if summary else [])+[f'{t}_v{v}'])
+def _short_title(product,job_input):
+    import re
+    from .renderer import _safe_segment
+    name=str(product.get('name') or '').strip()
+    if name:return _safe_segment(name)
+    line=str((job_input.get('lines') or [''])[0] or '').strip()
+    first=re.split(r'[，。！？!?,;；：:\s]',line,maxsplit=1)[0]
+    return _safe_segment(first or line)
 _SKIP_CATEGORIES=(
     ('index/probe','unreadable','无法解析（文件损坏或不完整）'),
     ('index/window','slice_failed','切片失败（该片段的画面无法读取）'),
@@ -828,8 +836,7 @@ class WorkbenchService:
         if cancel():raise Cancelled('render/cancel before export')
         self.queue.update(jid,stage='export',progress=85)
         lexical_under(x['output']['path'], x['output']['path'])
-        cover_local=(d/'cover.jpg') if report.get('cover') else None
-        dest,got=export_validated(final,x['output']['path'],jid,report,x['output'].get('_lease'),cover_local=cover_local,dest_name=_render_dest_name(p,x,jid))
+        dest,got=export_numbered(final,x['output']['path'],report,_short_title(p,x),authorization=x['output'].get('_lease'))
         # Publication has happened. A later cancellation is too late, and the
         # ledger must preserve the committed fact after independent readback.
         # Final authority window: re-read the product and immutable job before
