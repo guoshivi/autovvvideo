@@ -15,6 +15,7 @@ from pathlib import Path
 
 VOICE_ENGINES = {"qwen", "vox"}
 QWEN_SPEAKERS = {"Serena", "Vivian", "Uncle_Fu"}
+VOX_PROMPT_PHRASE = "大家好，今天和你分享一个实用的小发现。"
 VOX_PRESETS = {
     "natural_female": {
         "label": "自然分享女声",
@@ -185,6 +186,25 @@ def anchor_metadata(voice: str, model: str, wav: Path, *, seed: int, description
         "model_revision": "32279effe8c19989596f05d353d1447f51d9e915",
         "seed": int(seed), "description": str(description),
         "anchor_sha256": hashlib.sha256(wav.read_bytes()).hexdigest(),
+    }
+
+
+def prompt_metadata(voice: str, model: str, wav: Path, *, seed: int,
+                    phrase: str, source_sha256: str, kind: str) -> dict:
+    """Metadata for the fixed Vox prompt pair.
+
+    Keep this parallel to :func:`anchor_metadata` so cache identity remains
+    explicit and reviewable.  ``source_sha256`` identifies the reference WAV
+    that was actually passed to the SDK when this prompt was generated.
+    """
+    if kind not in {"preset", "clone"}:
+        raise VoiceEngineError("Vox 提示缓存音色类型无效")
+    return {
+        "engine": "vox", "preset": str(voice), "model": str(Path(model).absolute()),
+        "model_revision": "32279effe8c19989596f05d353d1447f51d9e915",
+        "kind": kind, "seed": int(seed), "phrase": str(phrase),
+        "source_sha256": str(source_sha256),
+        "prompt_sha256": hashlib.sha256(Path(wav).read_bytes()).hexdigest(),
     }
 
 

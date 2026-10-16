@@ -22,7 +22,8 @@ import numpy as np
 from .browser import reject_links
 from .tts_worker import apply_speed_wav, _normalize_loudness
 from .pacing import trim_wav_edges
-from .voice_engines import (VoiceEngineError, VOX_PRESETS, anchor_metadata, preset,
+from .voice_engines import (VoiceEngineError, VOX_PRESETS, VOX_PROMPT_PHRASE,
+                            anchor_metadata, prompt_metadata, preset,
                             resolve_clone_voice, validate_vox_voice)
 
 
@@ -188,6 +189,160 @@ def _check_pcm16(path: Path):
     return len(arr)
 
 
+def prompt_periodicity_median(path: Path, *, sample_rate: int = 24000) -> float:
+    """Median voiced-frame periodicity used by the fixed prompt quality gate."""
+    with wave.open(str(path), "rb") as f:
+        if (f.getnchannels(), f.getsampwidth(), f.getframerate()) != (1, 2, sample_rate):
+            raise RuntimeError("Vox 提示 WAV 必须是 24kHz 单声道 PCM16")
+        pcm = np.frombuffer(f.readframes(f.getnframes()), dtype="<i2").astype(np.float64) / 32768.0
+    frame_len, hop, nfft = 1024, 256, 4096
+    if len(pcm) < frame_len:
+        return 0.0
+    window = np.hanning(frame_len)
+    ratios = []
+    for start in range(0, len(pcm) - frame_len + 1, hop):
+        z = pcm[start:start + frame_len]
+        if float(np.sqrt(np.mean(z * z))) < 0.02:
+            continue
+        z = z * window
+        ac = np.fft.irfft(np.fft.rfft(z, nfft) * np.conjugate(np.fft.rfft(z, nfft)), nfft)[:2048]
+        if not len(ac) or ac[0] <= 0:
+            continue
+        lo, hi = max(1, int(sample_rate / 400)), min(2047, int(sample_rate / 70))
+        peak = lo + int(np.argmax(ac[lo:hi + 1]))
+        ratio = float(ac[peak] / ac[0])
+        if ratio > 0.3:
+            ratios.append(ratio)
+    return float(np.median(ratios)) if ratios else 0.0
+
+
+def _prompt_error(message="Vox 提示缓存校验失败，请清理该音色的提示缓存后重试"):
+    raise RuntimeError(message)
+
+
+def _validate_prompt(cache_root: Path, voice: str, model: Path, reference_wav: Path,
+                     anchor_meta: dict, kind: str):
+    folder = cache_root / voice
+    wav = folder / "prompt.wav"
+    meta = folder / "prompt.json"
+    if not wav.exists() and not meta.exists():
+        return None
+    try:
+        reject_links(folder); reject_links(wav); reject_links(meta)
+    except Exception as exc:
+        raise RuntimeError("Vox 提示缓存校验失败，请清理该音色的提示缓存后重试") from exc
+    if not wav.is_file() or not meta.is_file():
+        _prompt_error()
+    try:
+        data = json.loads(meta.read_text(encoding="utf8"))
+    except Exception as exc:
+        raise RuntimeError("Vox 提示缓存校验失败，请清理该音色的提示缓存后重试") from exc
+    required = {"engine", "preset", "model", "model_revision", "kind", "seed",
+                "phrase", "source_sha256", "prompt_sha256"}
+    base = int(anchor_meta["seed"])
+    valid_seeds = {base, base + 1103, base + 2206}
+    model_value = data.get("model") if isinstance(data, dict) else None
+    if (not isinstance(data, dict) or not required.issubset(data) or
+            data.get("engine") != "vox" or data.get("preset") != voice or
+            data.get("model_revision") != MODEL_REVISION or data.get("kind") != kind or
+            data.get("phrase") != VOX_PROMPT_PHRASE or
+            type(data.get("seed")) is not int or data.get("seed") not in valid_seeds or
+            not isinstance(model_value, str) or
+            str(Path(model_value).absolute()) != str(model.absolute())):
+        _prompt_error()
+    try:
+        prompt_hash = hashlib.sha256(wav.read_bytes()).hexdigest()
+        source_hash = hashlib.sha256(reference_wav.read_bytes()).hexdigest()
+    except Exception as exc:
+        raise RuntimeError("Vox 提示缓存校验失败，请清理该音色的提示缓存后重试") from exc
+    if prompt_hash != data.get("prompt_sha256"):
+        _prompt_error()
+    # A changed reference is the one supported reason to rebuild an existing
+    # prompt pair; all other identity drift fails closed above.
+    return wav, data, source_hash != data.get("source_sha256")
+
+
+def _write_prompt(cache_root: Path, voice: str, model: Path, model_obj, observer,
+                  ffmpeg: str, reference_wav: Path, anchor_meta: dict, kind: str):
+    folder = cache_root / voice
+    folder.mkdir(parents=True, exist_ok=True); reject_links(folder)
+    target = folder / "prompt.wav"
+    source_hash = hashlib.sha256(reference_wav.read_bytes()).hexdigest()
+    base = int(anchor_meta["seed"])
+    seeds = [base, base + 1103, base + 2206]
+    attempts = 0
+    with tempfile.TemporaryDirectory(dir=str(cache_root)) as td:
+        for seed in seeds:
+            attempts += 1
+            temp = Path(td) / f"prompt-{attempts}.wav"
+            try:
+                _seed_all(seed)
+                generated = model_obj.generate(
+                    text=VOX_PROMPT_PHRASE,
+                    reference_wav_path=str(reference_wav),
+                    normalize=False, denoise=False,
+                )
+                stop = observer.final()
+                if isinstance(stop, dict) and stop.get("natural_stop") is not True:
+                    raise RuntimeError("VoxCPM2 did not provide a natural stop decision")
+                arr, rate = _as_audio(generated, model_obj)
+                _convert_48k_to_24k(arr, rate, temp, ffmpeg)
+                receipt = {"voices": [{"file": temp.name, "samples": 0, "sha256": ""}]}
+                _normalize_loudness(ffmpeg, temp.parent, receipt)
+                if receipt.get("loudness_warning"):
+                    raise RuntimeError(receipt["loudness_warning"])
+                samples = _check_pcm16(temp)
+                seconds = samples / 24000.0
+                if not 1.6 <= seconds <= 6.5 or prompt_periodicity_median(temp) < 0.60:
+                    raise RuntimeError("Vox 提示音频未通过时长或周期度质检")
+                os.replace(temp, target)
+                reject_links(target)
+                metadata = prompt_metadata(
+                    voice, str(model), target, seed=seed, phrase=VOX_PROMPT_PHRASE,
+                    source_sha256=source_hash, kind=kind,
+                )
+                metadata_tmp = folder / ("prompt.json.tmp-" + next(tempfile._get_candidate_names()))
+                metadata_tmp.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf8")
+                os.replace(metadata_tmp, folder / "prompt.json")
+                reject_links(folder / "prompt.json")
+                return target, metadata, attempts
+            except Exception:
+                try: temp.unlink()
+                except OSError: pass
+                continue
+    raise VoiceEngineError("该音色的示范录音生成未通过质检，请更换或重新放入更清晰的参考音频后再试")
+
+
+def _ensure_prompt_pair(cache_root: Path, voice: str, model: Path, model_obj, observer,
+                        ffmpeg: str, reference_wav: Path, anchor_meta: dict, kind: str):
+    """Validate or cold-build the fixed prompt pair for one voice."""
+    found = _validate_prompt(cache_root, voice, model, reference_wav, anchor_meta, kind)
+    if found is not None:
+        wav, metadata, source_changed = found
+        if not source_changed:
+            return wav, {"path": str(wav), "phrase": VOX_PROMPT_PHRASE,
+                         "sha256": metadata["prompt_sha256"],
+                         "source_sha256": metadata["source_sha256"],
+                         "cold_start": False, "rebuilt": False, "attempts": 0,
+                         "seed": metadata["seed"]}
+        _, metadata, attempts = _write_prompt(cache_root, voice, model, model_obj, observer,
+                                               ffmpeg, reference_wav, anchor_meta, kind)
+        wav = cache_root / voice / "prompt.wav"
+        return wav, {"path": str(wav), "phrase": VOX_PROMPT_PHRASE,
+                     "sha256": metadata["prompt_sha256"],
+                     "source_sha256": metadata["source_sha256"],
+                     "cold_start": False, "rebuilt": True, "attempts": attempts,
+                     "seed": metadata["seed"]}
+    _, metadata, attempts = _write_prompt(cache_root, voice, model, model_obj, observer,
+                                          ffmpeg, reference_wav, anchor_meta, kind)
+    wav = cache_root / voice / "prompt.wav"
+    return wav, {"path": str(wav), "phrase": VOX_PROMPT_PHRASE,
+                 "sha256": metadata["prompt_sha256"],
+                 "source_sha256": metadata["source_sha256"],
+                 "cold_start": True, "rebuilt": False, "attempts": attempts,
+                 "seed": metadata["seed"]}
+
+
 def _validate_anchor(cache_root: Path, voice: str, model: Path):
     p = preset(voice); folder = cache_root / voice; wav = folder / "anchor.wav"; meta = folder / "anchor.json"
     if not wav.is_file() or not meta.is_file(): return None
@@ -310,11 +465,19 @@ def synthesize(request: dict, out_dir: str | Path, *, model_factory=None) -> dic
                            "source_sha256": hashlib.sha256(clone_src.read_bytes()).hexdigest(),
                            "reference": str(reference_wav)}
             anchor_created = False
-        result = {"success": False, "engine": "vox", "preset": voice, "completion": "natural_stop", "anchor": anchor_meta, "anchor_cold_start": anchor_created, "voices": [], "speed": speed}
+        prompt_wav, prompt_info = _ensure_prompt_pair(
+            cache_root, voice, model_path, model, observer, ffmpeg,
+            reference_wav, anchor_meta, "preset" if voice in VOX_PRESETS else "clone",
+        )
+        result = {"success": False, "engine": "vox", "preset": voice, "completion": "natural_stop", "anchor": anchor_meta, "anchor_cold_start": anchor_created, "prompt": prompt_info, "voices": [], "speed": speed}
         for i, line in enumerate(lines):
             before = len(observer.invocations)
             _seed_all(anchor_meta["seed"])
-            generated = model.generate(text=line, reference_wav_path=str(reference_wav), normalize=False, denoise=False)
+            generated = model.generate(
+                text=line, reference_wav_path=str(reference_wav),
+                prompt_wav_path=str(prompt_wav), prompt_text=VOX_PROMPT_PHRASE,
+                normalize=False, denoise=False,
+            )
             stop = observer.final()
             attempts = observer.invocations[before:]
             if not attempts:

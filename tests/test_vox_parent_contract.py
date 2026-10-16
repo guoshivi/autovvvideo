@@ -115,7 +115,8 @@ def test_synthesize_speed_changes_actual_samples_not_just_receipt(tmp_path):
             g=self.tts_model._inference(min_len=2,max_len=8,streaming=False)
             try:next(g)
             finally:g.close()
-            return np.sin(np.arange(48000,dtype=np.float64)*0.05)*0.1
+            n = 96000 if (kw.get('reference_wav_path') and kw.get('prompt_wav_path') is None) else 48000
+            return np.sin(np.arange(n,dtype=np.float64)*0.05)*0.1
     request={'lines':['显式合成模型协议测试，不代表真实配音'], 'vox_voice':'calm_male',
              'voxcpm_model':str(model),'voxcpm_cache':str(cache),
              'ffmpeg':shutil.which('ffmpeg'),'speed':1.25}

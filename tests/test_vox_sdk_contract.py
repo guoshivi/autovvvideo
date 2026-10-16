@@ -8,7 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 import numpy as np
 from workbench.voxcpm_worker import synthesize
-from workbench.voice_engines import preset
+from workbench.voice_engines import VOX_PROMPT_PHRASE, preset
 from test_vox_parent_contract import SyntheticCore
 
 
@@ -28,7 +28,9 @@ def test_full_adapter_uses_native_sdk_signature_and_voice_design_format(tmp_path
             generator=self.tts_model._inference(min_len=bound.arguments['min_len'],max_len=bound.arguments['max_len'],streaming=False)
             try:next(generator)
             finally:generator.close()
-            return np.sin(np.arange(48000,dtype=np.float64)*0.05)*0.1
+            n = 96000 if (bound.arguments.get('reference_wav_path') and
+                           bound.arguments.get('prompt_wav_path') is None) else 48000
+            return np.sin(np.arange(n,dtype=np.float64)*0.05)*0.1
     model=tmp_path/'model';model.mkdir()
     with patch('workbench.voxcpm_worker._seed_all') as seed, \
          patch('workbench.voxcpm_worker._normalize_loudness',return_value=None):
@@ -39,7 +41,12 @@ def test_full_adapter_uses_native_sdk_signature_and_voice_design_format(tmp_path
     style=preset('natural_female')
     assert calls[0]['text']==fixture['voice_design_format'].format(description=style['description'],text=style['anchor'])
     assert calls[0]['reference_wav_path'] is None
-    assert calls[1]['reference_wav_path']==calls[2]['reference_wav_path']
-    assert calls[1]['text']=='SDK协议第一句' and calls[2]['text']=='SDK协议第二句'
+    assert calls[1]['reference_wav_path'] is not None
+    assert calls[1]['reference_wav_path']==calls[2]['reference_wav_path']==calls[3]['reference_wav_path']
+    assert calls[2]['prompt_wav_path'] == calls[3]['prompt_wav_path']
+    assert calls[1]['text'] == VOX_PROMPT_PHRASE
+    assert calls[1]['prompt_wav_path'] is None and calls[1]['prompt_text'] is None
+    assert calls[2]['text']=='SDK协议第一句' and calls[3]['text']=='SDK协议第二句'
+    assert calls[2]['prompt_text'] == VOX_PROMPT_PHRASE
     assert all('seed' not in call for call in calls)
-    assert [call.args[0] for call in seed.call_args_list]==[style['seed']]*3
+    assert [call.args[0] for call in seed.call_args_list]==[style['seed']]*4

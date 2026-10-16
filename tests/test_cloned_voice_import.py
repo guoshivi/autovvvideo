@@ -12,8 +12,9 @@ import numpy as np
 import pytest
 from workbench.settings import ProductionSettings
 from workbench.voxcpm_worker import _prepare_clone_reference, synthesize
-from workbench.voice_engines import (VoiceEngineError, is_clone_voice_id,
-                                     list_clone_voices, resolve_clone_voice)
+from workbench.voice_engines import (VoiceEngineError, VOX_PROMPT_PHRASE,
+                                     is_clone_voice_id, list_clone_voices,
+                                     resolve_clone_voice)
 from test_vox_parent_contract import SyntheticCore
 
 
@@ -98,7 +99,8 @@ def test_dropped_voice_synthesis_uses_file_unchanged(tmp_path):
             g = self.tts_model._inference(min_len=2, max_len=8, streaming=False)
             try: next(g)
             finally: g.close()
-            return np.sin(np.arange(48000, dtype=np.float64) * 0.05) * 0.1
+            n = 96000 if 'prompt_wav_path' not in kw else 48000
+            return np.sin(np.arange(n, dtype=np.float64) * 0.05) * 0.1
 
     request = {'lines': ['克隆文件夹声音的合成测试'], 'voice': '女声 1', 'vox_clone_dir': str(voices),
                'voxcpm_model': str(model), 'voxcpm_cache': str(cache), 'ffmpeg': shutil.which('ffmpeg'), 'speed': 1.0}
@@ -106,10 +108,17 @@ def test_dropped_voice_synthesis_uses_file_unchanged(tmp_path):
          patch('workbench.voxcpm_worker._normalize_loudness', return_value=None):
         result = synthesize(request, tmp_path / 'output', model_factory=SyntheticPipeline)
     assert result['success'] is True and result['anchor_cold_start'] is False
-    assert len(calls) == 1 and calls[0]['reference_wav_path'] == str(src)
+    assert len(calls) == 2 and calls[0]['reference_wav_path'] == str(src)
+    assert 'prompt_wav_path' not in calls[0] and 'prompt_text' not in calls[0]
+    assert calls[1]['prompt_wav_path'] == str(cache / '女声 1' / 'prompt.wav')
+    assert calls[1]['reference_wav_path'] == str(src) and calls[1]['prompt_text'] == VOX_PROMPT_PHRASE
     assert result['anchor']['kind'] == 'clone' and result['anchor']['source_file'] == '女声 1.wav'
     assert hashlib.sha256(src.read_bytes()).hexdigest() == before
-    assert not (cache / '女声 1').exists()
+    assert (cache / '女声 1' / 'prompt.wav').is_file()
+    assert (cache / '女声 1' / 'prompt.json').is_file()
+    assert result['prompt']['cold_start'] is True and result['prompt']['rebuilt'] is False
+    assert result['prompt']['phrase'] == VOX_PROMPT_PHRASE
+    assert result['prompt']['path'] == str(cache / '女声 1' / 'prompt.wav')
     with wave.open(str(tmp_path / 'output' / 'voice_000.wav'), 'rb') as f:
         assert (f.getnchannels(), f.getsampwidth(), f.getframerate()) == (1, 2, 24000)
 
