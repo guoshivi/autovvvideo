@@ -16,6 +16,7 @@ from .media import sha256
 from .fs_authority import lexical_under, AuthorityError, capture_lease
 from .process import run_owned,Cancelled
 from .queue import CommitError as QueueCommitError
+from .cleanup import cleanup_job_dir,remove_job_dir,iter_tree
 from .voice_engines import (VoiceEngineError, VOX_PRESETS, require_vox_config, require_qwen_config,
                             list_clone_voices, resolve_clone_voice, validate_preview_payload, opaque_preview_id)
 
@@ -153,7 +154,7 @@ def _gpu_preflight_once(cfg):
     if reason:raise ServiceError(reason)
 class WorkbenchService:
     def __init__(self,cfg,store,queue,embedder_factory=None,start=True):
-        self.cfg=cfg;self.store=store;self.queue=queue;self.browser=FolderBrowser(cfg.nas_roots);self.embedder_factory=embedder_factory or (lambda:ProductionEmbedder(cfg.model_dir));self.stop_flag=threading.Event();self.worker=None;self.gpu_mutex=threading.RLock();self._running_job_id=None
+        self.cfg=cfg;self.store=store;self.queue=queue;self.browser=FolderBrowser(cfg.nas_roots);self.embedder_factory=embedder_factory or (lambda:ProductionEmbedder(cfg.model_dir));self.stop_flag=threading.Event();self.worker=None;self.gpu_mutex=threading.RLock();self._running_job_id=None;self.worker_error=None;self.disk_low=False;self.disk_free_bytes=None
         self._timing_mapping_cache={};self._timing_cache_lock=threading.RLock()
         self.preview_root=Path(cfg.data_root)/'voice-previews';self.preview_root.mkdir(parents=True,exist_ok=True);reject_links(self.preview_root);self._previews={};self._preview_lock=threading.RLock();self._preview_generation_lock=threading.Lock()
         if start:self.start()
@@ -163,6 +164,12 @@ class WorkbenchService:
     def close(self):
         self.stop_flag.set()
         if self.worker:self.worker.join(timeout=10)
+    def worker_status(self):
+        try:free=shutil.disk_usage(self.queue.root).free
+        except OSError:free=self.disk_free_bytes
+        threshold=getattr(self.cfg,'min_free_bytes',1610612736)
+        if free is not None:self.disk_free_bytes=free
+        return {'alive':bool(self.worker and self.worker.is_alive()),'running_job':self._running_job_id,'last_error':copy.deepcopy(self.worker_error),'disk':{'free_bytes':free,'threshold_bytes':threshold,'ok':free is None or free>=threshold}}
     def create_product(self,name):
         return self.public_product(self.store.create_product(name))
     def public_product(self,p):
@@ -536,7 +543,53 @@ class WorkbenchService:
     def cancel(self,pid,jid):
         j=self.queue.get(jid)
         if j['product_id']!=pid:raise KeyError(jid)
-        self.queue.cancel(jid);return self.public_job(self.queue.get(jid))
+        self.queue.cancel(jid)
+        latest=self.queue.get(jid)
+        if latest.get('status')=='running' and not (self.worker and self.worker.is_alive() and self._running_job_id==jid):
+            self.queue.finalize_cancel_running(jid);latest=self.queue.get(jid)
+        return self.public_job(latest)
+    def cancel_queued(self,pid):
+        self.store.get_product(pid)
+        return {'cancelled':self.queue.cancel_all_queued(pid)}
+    def get_prefs(self):
+        p=Path(self.cfg.data_root)/'prefs.json';default={'cleanup_after_success':True}
+        try:
+            d=json.loads(p.read_text(encoding='utf8'))
+            return {'cleanup_after_success':d.get('cleanup_after_success',True) is True} if isinstance(d,dict) else default
+        except Exception:return default
+    def set_prefs(self,body):
+        if not isinstance(body,dict) or type(body.get('cleanup_after_success')) is not bool:raise ServiceError('cleanup_after_success 必须是布尔值')
+        d={'cleanup_after_success':body['cleanup_after_success']};p=Path(self.cfg.data_root)/'prefs.json';p.parent.mkdir(parents=True,exist_ok=True);tmp=p.with_name(p.name+'.tmp');tmp.write_text(json.dumps(d,ensure_ascii=False,indent=2),encoding='utf8');os.replace(tmp,p);return d
+    def cleanup_records(self,pid,dry_run=False):
+        if type(dry_run) is not bool:raise ServiceError('dry_run 必须是布尔值')
+        self.store.get_product(pid)
+        terminal=('done','failed','cancelled','interrupted');jobs=[j for j in self.queue.all(pid) if j.get('status') in terminal]
+        counts={s:sum(1 for j in jobs if j.get('status')==s) for s in terminal}
+        if dry_run:
+            total=0
+            for j in jobs:
+                d=self.queue.root/j['id']
+                try:
+                    st=d.lstat()
+                    if st.st_mode & 0o170000 == 0o120000 or getattr(st,'st_file_attributes',0)&0x400 or not d.is_dir():continue
+                    for p,st2 in iter_tree(d):
+                        if st2.st_mode & 0o170000 == 0o100000:total+=st2.st_size
+                except OSError:pass
+            return {'counts':counts,'bytes':total,'total':len(jobs)}
+        removed=self.queue.remove_terminal([j['id'] for j in jobs]) if jobs else {}
+        freed=0;errors=[]
+        for jid in removed:
+            d=self.queue.root/jid
+            try:
+                st=d.lstat()
+                if d.parent != self.queue.root or st.st_mode & 0o170000 == 0o120000 or getattr(st,'st_file_attributes',0)&0x400:continue
+            except OSError:continue
+            b,e=remove_job_dir(d);freed+=b;errors.extend(e)
+        return {'removed':removed,'freed_bytes':freed,'errors':errors}
+    def archive_product(self,pid):
+        p=self.store.get_product(pid)
+        if any(j.get('status') in ('queued','running','paused') for j in self.queue.all(pid)):raise ServiceError('还有未结束的任务，请先取消或等它跑完')
+        return self.public_product(self.store.archive_product(pid))
     def _pause_requested(self,jid):
         return bool(self.queue.get(jid).get('pause_requested'))
     def _pause_aware_cancel(self,jid,cancel):
@@ -709,25 +762,48 @@ class WorkbenchService:
             pass    # already terminal: queue.update refuses a rewrite; record nothing
     def _loop(self):
         while not self.stop_flag.is_set():
-            job=self.queue.next()
-            if not job:self.stop_flag.wait(.2);continue
-            jid=job['id'];cancel=lambda:self.stop_flag.is_set() or self.queue.get(jid).get('cancel_requested',False)
-            self._running_job_id=jid
             try:
-                if sha256(self.queue.root/jid/'input.json')!=job['input_sha256']:raise ServiceError('input.json SHA changed')
-                if job['input']['kind']=='index':self._run_index(job,cancel)
-                else:self._run_render(job,self._pause_aware_cancel(jid,cancel))
-            except (InterruptedError,Cancelled) as e:self._finish_cancelled(jid,e)
-            except Exception as e:
-                if getattr(e,'after_replace',False):
+                threshold=getattr(self.cfg,'min_free_bytes',1610612736)
+                free=shutil.disk_usage(self.queue.root).free;self.disk_free_bytes=free
+                if free<threshold:
+                    self.disk_low=True
+                    self.stop_flag.wait(30);continue
+                self.disk_low=False
+                job=self.queue.next()
+                if not job:self.stop_flag.wait(.2);continue
+                jid=job['id'];cancel=lambda:self.stop_flag.is_set() or self.queue.get(jid).get('cancel_requested',False)
+                self._running_job_id=jid
+                try:
+                    if sha256(self.queue.root/jid/'input.json')!=job['input_sha256']:raise ServiceError('input.json SHA changed')
+                    if job['input']['kind']=='index':self._run_index(job,cancel)
+                    else:self._run_render(job,self._pause_aware_cancel(jid,cancel))
+                except (InterruptedError,Cancelled) as e:self._finish_cancelled(jid,e)
+                except Exception as e:
+                    self.worker_error={'at':time.time(),'type':type(e).__name__,'message':str(e)}
+                    if getattr(e,'after_replace',False):
+                        try:
+                            receipt=getattr(e,'receipt',None) or {}
+                            (self.queue.root/'reconciliation.json').write_text(json.dumps({'job_id':jid,'error':str(e),'after_effect':True,'receipt':receipt},ensure_ascii=False),encoding='utf8')
+                        except OSError:pass
+                    else:
+                        details=getattr(e,'details',None) or {'stage':job.get('stage','worker'),'check':type(e).__name__,'message':str(e)}
+                        try:self.queue.update(jid,status='failed',stage='failed',error=details)
+                        except BaseException:pass
+                except BaseException as e:
                     try:
-                        receipt=getattr(e,'receipt',None) or {}
-                        (self.queue.root/'reconciliation.json').write_text(json.dumps({'job_id':jid,'error':str(e),'after_effect':True,'receipt':receipt},ensure_ascii=False),encoding='utf8')
-                    except OSError:pass
-                    continue
-                details=getattr(e,'details',None) or {'stage':job.get('stage','worker'),'check':type(e).__name__,'message':str(e)}
-                self.queue.update(jid,status='failed',stage='failed',error=details)
-            finally:self._running_job_id=None
+                        if self.queue.get(jid).get('status') not in ('done','failed','cancelled','interrupted'):self.queue.update(jid,status='failed',stage='failed',error={'stage':'worker','check':type(e).__name__,'message':str(e)})
+                    except BaseException:pass
+                    raise
+                finally:self._running_job_id=None
+            except BaseException as e:
+                self.worker_error={'at':time.time(),'type':type(e).__name__,'message':str(e)}
+                jid=self._running_job_id
+                if jid:
+                    try:
+                        if self.queue.get(jid).get('status') not in ('done','failed','cancelled','interrupted'):self.queue.update(jid,status='failed',stage='failed',error={'stage':'worker','check':type(e).__name__,'message':str(e)})
+                    except BaseException:pass
+                self._running_job_id=None
+                self.stop_flag.wait(2)
     def _run_index(self,j,cancel):
         x=j['input'];p=self.store.get_product(j['product_id'])
         if (p.get('source') or {}).get('path')!=(x['source'] or {}).get('path') or not self._snapshot_fresh(x,require_mapping=False):raise ServiceError('index/source generation changed')
@@ -857,6 +933,17 @@ class WorkbenchService:
                 self.queue.update(jid,status='done',stage='done',progress=100,output=str(dest),artifact=got,report=report,output_folder=(x['output'].get('token') or x['output']['path']),condition=commit)
             except Exception as e:
                 raise QueueCommitError('publication completed but queue terminal commit requires reconciliation',after_replace=True) from e
+        try:
+            art=self.queue.get(jid).get('artifact') or {}
+            if self.get_prefs().get('cleanup_after_success') and isinstance(art,dict) and 'sha256' in art and 'bytes' in art:
+                out=Path(self.queue.get(jid).get('output') or '')
+                if out.is_file() and out.stat().st_size==art.get('bytes'):
+                    receipt=cleanup_job_dir(d,Path(getattr(self.cfg,'font_path','')).name)
+                    self.queue.update(jid,cleanup={'at':time.time(),'files':receipt.get('files',0),'bytes':receipt.get('bytes',0),'errors':receipt.get('errors',[])})
+                else:self.queue.update(jid,cleanup={'at':time.time(),'files':0,'bytes':0,'errors':['output receipt mismatch; cleanup skipped']})
+        except Exception as e:
+            try:self.queue.update(jid,cleanup={'at':time.time(),'files':0,'bytes':0,'errors':[str(e)]})
+            except Exception:pass
 class _null:
     def __enter__(self):return None
     def __exit__(self,*a):return False

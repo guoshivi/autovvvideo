@@ -7,7 +7,7 @@ class ConfigError(ValueError):pass
 class RuntimeConfig:
     host:str='127.0.0.1';port:int=8765;data_root:str='./data';nas_roots:list[str]=field(default_factory=lambda:['./materials']);output_root:str='./output'
     model_dir:str='';tts_model:str='';tools_dir:str='';font_path:str='';gpu_lock_path:str='./data/gpu.lock';project_src:str='.'
-    ffmpeg:str='';ffprobe:str='';fdk_encoder:str='';tts_python:str='';embedding_python:str='';max_index_seconds:int=14400;max_stage_seconds:int=3600;comfy_ports:list[int]=field(default_factory=list)
+    ffmpeg:str='';ffprobe:str='';fdk_encoder:str='';tts_python:str='';embedding_python:str='';max_index_seconds:int=14400;max_stage_seconds:int=3600;min_free_bytes:int=1610612736;comfy_ports:list[int]=field(default_factory=list)
     # Optional trial engine.  Empty values keep all existing Qwen-only
     # configurations valid; production_validate deliberately does not require
     # these fields because Vox is an opt-in installation.
@@ -29,6 +29,7 @@ class RuntimeConfig:
         if not isinstance(self.nas_roots,list) or not self.nas_roots or any(not isinstance(x,str) or not x for x in self.nas_roots):raise ConfigError('nas_roots must be explicit nonempty paths')
         for k in ('max_index_seconds','max_stage_seconds'):
             if type(getattr(self,k)) is not int or getattr(self,k)<30:raise ConfigError(f'{k} must be >=30 integer')
+        if type(self.min_free_bytes) is not int or self.min_free_bytes<100*1024*1024:raise ConfigError('min_free_bytes must be >=100MiB integer')
         try:normalize_endpoint(self.ai_base_url,bool(self.ai_api_key))
         except ValueError as e:raise ConfigError(str(e)) from None
         if self.ai_api_key and not isinstance(self.ai_api_key,str):raise ConfigError('ai_api_key must be a string')

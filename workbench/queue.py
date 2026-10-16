@@ -137,7 +137,7 @@ class JobQueue:
             j=self.jobs[i]
             forbidden={'input','input_sha256','product_id','variant','id','revision'}
             if forbidden.intersection(kw): raise ValueError('immutable job fields')
-            allowed={'status','stage','progress','indexed','total','reused','skipped','skipped_files','index_id','error','cancel_requested','pause_requested','output','artifact','report','output_folder'}
+            allowed={'status','stage','progress','indexed','total','reused','skipped','skipped_files','index_id','error','cancel_requested','pause_requested','output','artifact','report','output_folder','cleanup'}
             unknown=set(kw)-allowed
             if unknown: raise ValueError(f'unknown mutable job fields: {sorted(unknown)}')
             if kw.get('status')=='done' and condition is None:raise ValueError('done requires trusted commit condition')
@@ -155,6 +155,22 @@ class JobQueue:
             # outright; a live one stops at its next pause/cancel checkpoint and
             # the worker then reports the terminal state.
             if c['status'] in ('queued','paused'):c.update(status='cancelled',stage='cancelled')
+            self._save(candidate);return True
+    def cancel_all_queued(self,pid=None):
+        assert_mutation_allowed()
+        with self.lock:
+            candidate=copy.deepcopy(self.jobs);n=0
+            for j in candidate.values():
+                if j.get('status')=='queued' and (pid is None or j.get('product_id')==pid):
+                    j.update(status='cancelled',stage='cancelled',cancel_requested=True);n+=1
+            if n:self._save(candidate)
+            return n
+    def finalize_cancel_running(self,i):
+        assert_mutation_allowed()
+        with self.lock:
+            j=self.jobs.get(i)
+            if not j or j.get('status')!='running' or not j.get('cancel_requested'):return False
+            candidate=copy.deepcopy(self.jobs);candidate[i].update(status='cancelled',stage='cancelled',error={'stage':'cancel','check':'worker_stopped','message':'出片线程已停止，任务已直接取消'})
             self._save(candidate);return True
     def pause(self,i):
         """Ask a job to suspend at its next checkpoint.
@@ -208,6 +224,23 @@ class JobQueue:
             for j in self.jobs.values():
                 if j['status']=='queued':
                     candidate=copy.deepcopy(self.jobs);candidate[j['id']].update(status='running',stage='starting');self._save(candidate);return copy.deepcopy(candidate[j['id']])
+    def remove_terminal(self,ids,condition=None):
+        assert_mutation_allowed()
+        ids=list(ids)
+        with self.lock:
+            for jid in ids:
+                if jid not in self.jobs:raise ValueError(f'unknown job: {jid}')
+                if self.jobs[jid].get('status') not in ('done','failed','cancelled','interrupted'):
+                    raise ValueError(f'job is not terminal: {jid}')
+            candidate=copy.deepcopy(self.jobs);removed={jid:candidate[jid]['status'] for jid in ids}
+            for jid in ids:del candidate[jid]
+            def guard(value):
+                for jid,status in removed.items():
+                    cur=self.jobs.get(jid)
+                    if not cur or cur.get('status')!=status:return False
+                return condition(value) if condition is not None else True
+            self._save(candidate,guard)
+            return removed
 
 class CommitError(IOError):
     def __init__(self,message,after_replace=False):super().__init__(message);self.after_replace=after_replace

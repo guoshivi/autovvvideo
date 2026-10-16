@@ -142,6 +142,8 @@ class WorkbenchHandler(BaseHTTPRequestHandler):
             u=urlparse(self.path);q=parse_qs(u.query);svc=self.server.service
             if u.path=='/api/products':return self._json([svc.public_product(p) for p in svc.store.list_products(bool(q.get('archived')))])
             if u.path=='/api/jobs':return self._json([svc.public_job(j) for j in svc.queue.all(q.get('product_id',[None])[0])])
+            if u.path=='/api/worker':return self._json(svc.worker_status())
+            if u.path=='/api/prefs':return self._json(svc.get_prefs())
             if u.path.startswith('/api/products/') and u.path.endswith('/index'):
                 return self._json(svc.index_state(u.path.split('/')[3]))
             if u.path=='/api/browse':
@@ -263,12 +265,16 @@ class WorkbenchHandler(BaseHTTPRequestHandler):
                 if parts[-1]=='timing':return self._json(svc.timing(pid,body.get('text',''),body.get('settings')))
                 if parts[-1]=='jobs':return self._json(svc.enqueue(pid,int(body.get('count',1)),body.get('text'),body.get('settings')),202)
                 if parts[-1]=='cancel':return self._json(svc.cancel(pid,body['job_id']))
+                if parts[-1]=='cancel-queued':return self._json(svc.cancel_queued(pid))
+                if parts[-1]=='cleanup-records':return self._json(svc.cleanup_records(pid,body.get('dry_run',False)))
+                if parts[-1]=='archive':return self._json(svc.archive_product(pid))
                 if parts[-1]=='pause':return self._json(svc.pause(pid,body['job_id']))
                 if parts[-1]=='resume':return self._json(svc.resume(pid,body['job_id']))
                 if parts[-1]=='ai-copy':return self._json(svc.ai_copy(pid,body))
                 if parts[-1]=='open-folder':return self._json(svc.open_folder(pid,body.get('job_id')))
             if u.path=='/api/retrieval':return self._json(svc.retrieve(body['product_id'],body.get('text','')))
             if u.path=='/api/ai-settings':return self._json(svc.set_ai_settings(body))
+            if u.path=='/api/prefs':return self._json(svc.set_prefs(body))
             if u.path=='/api/voice-preview':return self._json(svc.preview_voice(body),202)
             self.send_error(404)
         except Exception as e:self._error(e)

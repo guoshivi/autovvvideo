@@ -1,5 +1,5 @@
 /* 视频工作台 V2 前端（v9：AI 文案 / 语速 / 目标时长 / 常用稿 / 一键出片 / 封面片头尾 / 结果卡片 / 镜头去重） */
-const state={products:[],jobs:[],product:null,draft:'',retrieval:[],roots:[],picker:null,batchMode:'single',batchCount:1,bgm:null,cover:null,intro:null,outro:null,indexReady:false,indexInfo:null,timing:null,aiOpen:false,aiBusy:false,aiHasKey:false,aiOut:null,lastJobsSig:'',lastIndexSample:null,settingsTimer:null,settingsTimers:{},queuePage:1,previewBusy:false,previewAudio:null,cleanUndo:null,voxPresets:null,voxClones:[],voxCloneDir:''};
+const state={products:[],jobs:[],product:null,noAutoSelect:false,draft:'',retrieval:[],roots:[],picker:null,batchMode:'single',batchCount:1,bgm:null,cover:null,intro:null,outro:null,indexReady:false,indexInfo:null,timing:null,aiOpen:false,aiBusy:false,aiHasKey:false,aiOut:null,lastJobsSig:'',lastIndexSample:null,settingsTimer:null,settingsTimers:{},queuePage:1,resultsPage:1,prefs:{cleanup_after_success:true},worker:null,previewBusy:false,previewAudio:null,cleanUndo:null,voxPresets:null,voxClones:[],voxCloneDir:''};
 const $=s=>document.querySelector(s),esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 async function api(url,opt){opt=opt||{};const ctl=new AbortController();const tid=setTimeout(()=>ctl.abort(),opt.timeoutMs||30000);let r;
 try{r=await fetch(url,Object.assign({},opt,{signal:ctl.signal}))}catch(e){clearTimeout(tid);throw Error(e.name==='AbortError'?'请求超时，请再试一次':e.message)}
@@ -23,8 +23,9 @@ h.querySelectorAll('[data-cancel]').forEach(el=>el.onclick=()=>{h.innerHTML='';r
 h.querySelector('[data-ok]').onclick=()=>{h.innerHTML='';res(true)}})}
 async function load(){try{setErr('');syncDraft();
   state.products=await api('/api/products');
-  if(!state.product&&state.products.length)state.product=state.products[state.products.length-1];
+  if(!state.product&&!state.noAutoSelect&&state.products.length)state.product=state.products[state.products.length-1];
   state.jobs=await api('/api/jobs'+(state.product?'?product_id='+state.product.id:''));
+  try{state.prefs=await api('/api/prefs')}catch(e){state.prefs={cleanup_after_success:true}}
   if(state.product)state.product=state.products.find(p=>p.id===state.product.id)||null;
   if(!state.roots.length){try{state.roots=await api('/api/roots')}catch(e){}}
   try{const vv=await api('/api/vox-voices');state.voxPresets=vv.presets||null;state.voxClones=vv.clones||[];state.voxCloneDir=vv.dir||''}catch(e){}
@@ -69,7 +70,7 @@ function persistSettings(){if(!state.product)return;const productId=state.produc
     const i=state.products.findIndex(x=>x.id===productId);if(i>=0)state.products[i]=p;if(state.product&&state.product.id===productId&&!timers[productId])state.product=p;window.__lastPersistErr=''}
   catch(e){if(window.__lastPersistErr!==e.message){window.__lastPersistErr=e.message;toast('设置没保存上：'+e.message,'warn')}}},600);
   timers[productId]=timer;state.settingsTimer=timer}
-function renderTop(){const sel=$('#prodSel');if(!sel)return;sel.innerHTML='<option value="">（未选择商品）</option>'+state.products.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('');sel.value=state.product?state.product.id:''}
+function renderTop(){const sel=$('#prodSel');if(!sel)return;sel.innerHTML='<option value="">（未选择商品）</option>'+state.products.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('');sel.value=state.product?state.product.id:'';const b=$('#btnArchive');if(b)b.disabled=!state.product}
 function idxText(st){if(st.loading)return '正在检查素材状态…';if(st.error)return esc(st.error);if(st.ready)return `索引 ${st.index.count} 个视频，可用于出片${skipSummary(st)}`;const t=(st.tasks||[]).slice(-1)[0];
 if(t&&['queued','running'].includes(t.status))return `正在解析素材：已解析 ${t.indexed||0}/${t.total||'?'} 条`+(t.reused?`（复用 ${t.reused} 条）`:'')+(t.skipped?`（跳过 ${t.skipped} 条）`:'')+'，页面别关';
 if(t&&t.status==='paused')return `索引已暂停${t.skipped?`（已跳过 ${t.skipped} 条）`:''}：到任务队列点「继续」接着跑，点「取消」停止`;
@@ -412,26 +413,31 @@ function renderQueue(){const el=$('#secQueue');if(!el)return;
   const slice=jobs.slice((page-1)*QUEUE_PER_PAGE,page*QUEUE_PER_PAGE);
   const chips=QUEUE_FILTERS.map(([k,label])=>`<button class="qfbtn${f===k?' active':''}" onclick="queueSetFilter('${k}')">${label} <b>${cnt[k]}</b></button>`).join('');
   const pager=`<div class="qfilter">${chips}</div><div class="pager"><span class="muted small">共 ${total} 条</span>${pages>1?`<button class="secondary small" onclick="queueGo(-1)" ${page<=1?'disabled':''}>‹ 上一页</button><span class="small pageno">第 ${page}/${pages} 页</span><button class="secondary small" onclick="queueGo(1)" ${page>=pages?'disabled':''}>下一页 ›</button>`:''}</div>`;
-  el.innerHTML=`<h3><span class="num">3</span>任务队列 <small class="muted">自动刷新</small></h3>${pager}<div class="list">${slice.map(j=>`<div class="item" title="${esc((j.error||{}).message||'')}"><span class="it-main">${jobLine(j)}${['running','queued','paused'].includes(j.status)?`<span class="pbar"><i style="width:${Math.max(2,j.progress||0)}%"></i></span>`:''}</span><span class="row">${j.script_summary&&j.lines_count?`<span class="muted small">「${esc(j.script_summary)}」</span>`:''}<b class="tag ${tagCls(j.status)}">${esc(cn(STATUS_CN,j.status))}</b>${jobActions(j)}</span>${j.status==='paused'?`<div class="skipline">暂停点＝文件/步骤边界：正在跑的那一步会先结束，暂停期间不再开始新步骤；点「继续」接着跑</div>`:''}${j.status==='failed'&&j.error?`<div class="errline">失败原因：${esc(humanError(j))}</div>`:''}${j.skipped_files&&j.skipped_files.length?`<div class="skipline">跳过 ${j.skipped_files.length} 个素材：${esc(j.skipped_files.map(s=>s.name+'（'+(s.reason_cn||s.reason||'读取失败')+'）').join('、'))} · 下次建索引会自动重试</div>`:''}</div>`).join('')||`<p class="muted">${f==='all'?'暂无任务——创建后会在这里逐条显示进度':'当前筛选下没有任务'}</p>`}</div>`}
+  const queued=all.filter(j=>j.status==='queued').length,terminal=all.filter(j=>['done','failed','cancelled','interrupted'].includes(j.status)).length,w=state.worker||{};const disk=w.disk||{};
+  const status=!w.alive&&state.worker?`<div class="errline">出片线程已停止：需要重启服务（或联系技术支持），已停放的任务可先取消</div>`:disk.ok===false?`<div class="skipline">磁盘空间不足（剩 ${(Number(disk.free_bytes||0)/1073741824).toFixed(1)} GB）：已暂停接单，清理空间后会自动继续</div>`:disk.free_bytes!=null?`<div class="muted small">磁盘剩余 ${(Number(disk.free_bytes)/1073741824).toFixed(1)} GB</div>`:'';
+  const tools=`<div class="row queue-tools">${queued?`<button class="secondary small" onclick="cancelAllQueued()">取消全部排队中 (${queued})</button>`:''}<label class="muted small"><input type="checkbox" ${state.prefs.cleanup_after_success?'checked':''} onchange="toggleCleanup(this)"> 出片成功后自动清理中间文件</label><button class="secondary small" onclick="cleanupRecords()" ${terminal?'':'disabled'}>清理已结束记录</button></div>`;
+  el.innerHTML=`<h3><span class="num">3</span>任务队列 <small class="muted">自动刷新</small></h3>${status}${tools}${pager}<div class="list">${slice.map(j=>`<div class="item" title="${esc((j.error||{}).message||'')}"><span class="it-main">${jobLine(j)}${['running','queued','paused'].includes(j.status)?`<span class="pbar"><i style="width:${Math.max(2,j.progress||0)}%"></i></span>`:''}</span><span class="row">${j.script_summary&&j.lines_count?`<span class="muted small">「${esc(j.script_summary)}」</span>`:''}<b class="tag ${tagCls(j.status)}">${esc(cn(STATUS_CN,j.status))}</b>${jobActions(j)}</span>${j.cleanup&&j.cleanup.files>0?`<div class="muted small">· 已清理 ${fmtBytes(j.cleanup.bytes)}</div>`:''}${j.status==='paused'?`<div class="skipline">暂停点＝文件/步骤边界：正在跑的那一步会先结束，暂停期间不再开始新步骤；点「继续」接着跑</div>`:''}${j.status==='failed'&&j.error?`<div class="errline">失败原因：${esc(humanError(j))}</div>`:''}${j.skipped_files&&j.skipped_files.length?`<div class="skipline">跳过 ${j.skipped_files.length} 个素材：${esc(j.skipped_files.map(s=>s.name+'（'+(s.reason_cn||s.reason||'读取失败')+'）').join('、'))} · 下次建索引会自动重试</div>`:''}</div>`).join('')||`<p class="muted">${f==='all'?'暂无任务——创建后会在这里逐条显示进度':'当前筛选下没有任务'}</p>`}</div>`}
 function resultGroups(){const done=state.jobs.filter(j=>j.status==='done'&&j.artifact&&j.lines_count!==undefined);
   const byDate={};done.forEach(j=>{const ts=j.finished_at||j.created_at||0;const dk=dayKey(ts);(byDate[dk]=byDate[dk]||[]).push(j)});
   const dates=Object.keys(byDate).sort((a,b)=>{const va=Math.max(...byDate[a].map(x=>x.finished_at||0)),vb=Math.max(...byDate[b].map(x=>x.finished_at||0));return vb-va});
-  return dates.map(d=>{const jobs=byDate[d].sort((a,b)=>(b.finished_at||0)-(a.finished_at||0));
+  const out=[];dates.forEach(d=>{const jobs=byDate[d].sort((a,b)=>(b.finished_at||0)-(a.finished_at||0));
     const groups=[];jobs.forEach(j=>{const key=(j.script_summary||'')+'|'+(j.lines_count||0);let g=groups.find(x=>x.key===key);if(!g){g={key,summary:j.script_summary||'（无标题）',lines:j.lines_count||0,items:[]};groups.push(g)}g.items.push(j)});
     groups.forEach(g=>g.items.sort((a,b)=>(a.variant||0)-(b.variant||0)));
-    return {date:d,jobs:jobs.length,groups}})}
+    groups.forEach(g=>out.push(Object.assign({},g,{date:d,finished_at:Math.max(...g.items.map(x=>x.finished_at||0))})));});
+  return out.sort((a,b)=>(b.finished_at||0)-(a.finished_at||0))}
 function renderResults(){const el=$('#secResults');if(!el)return;
   if(!state.product){el.innerHTML='<h3><span class="num">4</span>结果</h3><p class="muted">选择商品后显示。</p>';return}
-  const data=resultGroups();
-  el.innerHTML=`<h3><span class="num">4</span>结果 <small class="muted">完成后可播放 / 下载</small></h3>`+(data.length?'':`<p class="muted">还没有成片——出片完成后会在这里以卡片显示。</p>`)+
-  data.map(d=>`<details class="daygroup" open><summary>${esc(d.date)} · ${d.jobs} 条</summary>${d.groups.map(g=>resCard(g)).join('')}</details>`).join('')}
+  const data=resultGroups(),total=data.length,pages=Math.max(1,Math.ceil(total/12));state.resultsPage=Math.min(pages,Math.max(1,state.resultsPage||1));const page=state.resultsPage,slice=data.slice((page-1)*12,page*12);
+  const pager=`<div class="pager"><span class="muted small">共 ${total} 组</span>${pages>1?`<button class="secondary small" onclick="resultsGo(-1)" ${page<=1?'disabled':''}>‹ 上一页</button><span class="small pageno">第 ${page}/${pages} 页</span><button class="secondary small" onclick="resultsGo(1)" ${page>=pages?'disabled':''}>下一页 ›</button>`:''}</div>`;
+  el.innerHTML=`<h3><span class="num">4</span>结果 <small class="muted">完成后可播放 / 下载</small></h3>${total?pager:`<p class="muted">还没有成片——出片完成后会在这里以卡片显示。</p>`}${slice.map(d=>`<div class="daygroup"><div class="resgroup"><span class="chip">${esc(d.date)}</span>${resCard(d)}</div></div>`).join('')}`}
+function resultsGo(d){const pages=Math.max(1,Math.ceil(resultGroups().length/12));state.resultsPage=Math.min(pages,Math.max(1,(state.resultsPage||1)+d));renderResults()}
 function resCard(g){const first=g.items[0];const vcount=g.items.length;
   return `<div class="rescard"><div class="resthumb"><img loading="lazy" src="/api/thumbs/${first.id}?product_id=${state.product.id}&v=${Math.floor((first.finished_at||0)*1000)}" alt="" onerror="this.closest('.resthumb').classList.add('noimg')"></div><div class="resbody"><div class="restitle">「${esc(g.summary)}」 <span class="muted">${g.lines} 句 · ${vcount} 版</span></div>${g.items.map(j=>`<div class="verrow"><span class="vchip">v${j.variant||0}</span><span class="vmeta">${fmtSec(j.duration)} · ${fmtBytes(j.bytes)} · ${fmtClock(j.finished_at)}</span><span class="vacts"><a class="miniact" href="/api/results/${j.id}?product_id=${state.product.id}" target="_blank" rel="noopener">播放</a><a class="miniact" href="/api/results/${j.id}?product_id=${state.product.id}" download="job-${j.id.slice(0,8)}.mp4">下载</a><button class="miniact" onclick="openFolder('${j.id}')">打开文件夹</button><a class="miniact" href="/api/reports/${j.id}?product_id=${state.product.id}" target="_blank" rel="noopener">报告</a></span></div>`).join('')}</div></div>`}
 async function openFolder(jid){try{const r=await api(`/api/products/${state.product.id}/open-folder`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({job_id:jid})});
   toast(r.opened?'已在 Win 机上打开文件夹：'+r.path:'文件夹：'+r.path)}catch(e){toast(e.message,'warn')}}
 let liveBusy=false,reloadAt=0,idxDirty=true,idxAt=0;
 async function refreshLive(){if(liveBusy)return;liveBusy=true;
-  try{state.jobs=await api('/api/jobs'+(state.product?'?product_id='+state.product.id:''));
+  try{state.jobs=await api('/api/jobs'+(state.product?'?product_id='+state.product.id:''));try{state.worker=await api('/api/worker')}catch(e){};
     renderQueue();const sig=JSON.stringify(state.jobs.filter(j=>j.status==='done').map(j=>[j.id,j.finished_at]));if(sig!==state.lastJobsSig){state.lastJobsSig=sig;renderResults()}
     if(state.product&&(idxDirty||Date.now()-idxAt>20000)){idxDirty=false;idxAt=Date.now();await refreshIdxState()}
     if(state.needReload&&Date.now()-reloadAt>8000){reloadAt=Date.now();await load()}
@@ -440,6 +446,10 @@ async function refreshLive(){if(liveBusy)return;liveBusy=true;
 async function createProduct(){const n=$('#newName').value.trim();if(!n)return;try{const p=await api('/api/products',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:n})});$('#newName').value='';state.product=p;state.previewAudio=null;state.draft='';await load();toast('商品已创建')}catch(e){toast(e.message,'warn')}}
 async function cancelJob(id){const ok=await confirmDialog('取消这个任务？会尽快停下；建索引已完成的文件会保留，下次可续跑。');if(!ok)return;
   try{await api(`/api/products/${state.product.id}/cancel`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({job_id:id})});await refreshLive();toast('已取消')}catch(e){toast(e.message,'warn')}}
+async function cancelAllQueued(){const n=state.jobs.filter(j=>j.status==='queued').length;if(!n||!state.product)return;if(!await confirmDialog(`确定取消当前商品全部 ${n} 条排队中的任务？`))return;try{const r=await api(`/api/products/${state.product.id}/cancel-queued`,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});await refreshLive();toast(`已取消 ${r.cancelled} 条`)}catch(e){toast(e.message,'warn')}}
+async function toggleCleanup(el){const old=state.prefs.cleanup_after_success;try{state.prefs=await api('/api/prefs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({cleanup_after_success:!!el.checked})})}catch(e){el.checked=old;state.prefs.cleanup_after_success=old;toast(e.message,'warn')}}
+async function cleanupRecords(){if(!state.product)return;try{const d=await api(`/api/products/${state.product.id}/cleanup-records`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({dry_run:true})});if(!d.total)return;const ok=await confirmDialog(`将清理 ${d.total} 条已结束记录（完成 ${d.counts.done} / 失败 ${d.counts.failed} / 已取消 ${d.counts.cancelled} / 已中断 ${d.counts.interrupted}），并删除它们在本机的任务文件；NAS 与输出文件夹的成片不受影响。继续？`);if(!ok)return;const r=await api(`/api/products/${state.product.id}/cleanup-records`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({dry_run:false})});await refreshLive();toast(`已清理 ${Object.keys(r.removed||{}).length} 条，释放约 ${(Number(r.freed_bytes||0)/1048576).toFixed(1)} MB`)}catch(e){toast(e.message,'warn')}}
+async function archiveProduct(){if(!state.product)return;if(!await confirmDialog(`从商品列表删除「${state.product.name}」？任务记录与文件会保留在本机，可恢复。`))return;try{const id=state.product.id;await api(`/api/products/${id}/archive`,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});state.product=null;state.noAutoSelect=true;state.resultsPage=1;await load();toast('商品已删除')}catch(e){toast(e.message,'warn')}}
 async function pauseJob(id){
   try{await api(`/api/products/${state.product.id}/pause`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({job_id:id})});await refreshLive();
     const j=state.jobs.find(x=>x.id===id)||{};
@@ -448,7 +458,7 @@ async function pauseJob(id){
 async function resumeJob(id){
   try{await api(`/api/products/${state.product.id}/resume`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({job_id:id})});await refreshLive();toast('已继续')}catch(e){toast(e.message,'warn')}}
 /* ---------- init ---------- */
-$('#prodSel').onchange=e=>{state.product=state.products.find(p=>p.id===e.target.value)||null;state.previewAudio=null;state.draft='';state.retrieval=[];state.bgm=null;state.cover=null;state.intro=null;state.outro=null;state.indexInfo=null;state.indexReady=false;idxDirty=true;idxAt=0;load()};
+$('#prodSel').onchange=e=>{state.noAutoSelect=false;state.product=state.products.find(p=>p.id===e.target.value)||null;state.resultsPage=1;state.previewAudio=null;state.draft='';state.retrieval=[];state.bgm=null;state.cover=null;state.intro=null;state.outro=null;state.indexInfo=null;state.indexReady=false;idxDirty=true;idxAt=0;load()};
 $('#newName').addEventListener('keydown',e=>{if(e.key==='Enter')createProduct()});
 document.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key==='Enter'){e.preventDefault();if($('#btnGo')&&!$('#btnGo').disabled)makeJobs()}});
 load();setInterval(()=>{if(document.visibilityState==='visible')refreshLive()},2000);

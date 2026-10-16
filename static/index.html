@@ -2,7 +2,7 @@
 <div class="app2">
 <header class="topbar">
   <div class="brand">视频工作台<span>Windows 本机混剪 · AI 文案按需发送给所填服务商</span></div>
-  <div class="top-actions"><span class="muted">商品</span><select id="prodSel" aria-label="选择商品"><option value="">（未选择商品）</option></select><input id="newName" placeholder="新商品名称" aria-label="新商品名称"><button class="primary" onclick="createProduct()">＋ 创建</button></div>
+  <div class="top-actions"><span class="muted">商品</span><select id="prodSel" aria-label="选择商品"><option value="">（未选择商品）</option></select><button id="btnArchive" class="secondary small" onclick="archiveProduct()" disabled>删除商品</button><input id="newName" placeholder="新商品名称" aria-label="新商品名称"><button class="primary" onclick="createProduct()">＋ 创建</button></div>
 </header>
 <div id="err" class="panel error" hidden></div>
 <main class="stack">
