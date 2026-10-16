@@ -220,7 +220,7 @@ class WorkbenchHandler(BaseHTTPRequestHandler):
                         import re
                         m=re.fullmatch(r'bytes=(\d*)-(\d*)',rh.strip())
                         if not m: raise ValueError('invalid Range')
-                        a,b=m.groups(); start=int(a) if a else max(0,total-int(b or 0)); end=int(b) if b else total-1
+                        a,b=m.groups(); start=int(a) if a else max(0,total-int(b or 0)); end=int(b) if a and b else total-1
                         if start<0 or start> end or end>=total:
                             self._response_started=True;self.send_response(416);self.send_header('Content-Range',f'bytes */{total}');self.end_headers();return
                         status=206;n=end-start+1
