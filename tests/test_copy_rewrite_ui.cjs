@@ -11,6 +11,8 @@ function fixture(){
     '#copy':{value:'原稿 A'}, '#secScript':{innerHTML:''}, '#aiStatus':{textContent:''},
     '#aiOut':{hidden:true}, '#aiOutTitle':{textContent:''}, '#aiOutBody':{textContent:''},
     '#aiPanel':{hidden:true}, '#aiName':{value:'商品A'}, '#aiRewriteReason':{value:''},
+    '#rewritePreview':{hidden:true}, '#aiRewritePreviewBody':{textContent:''},
+    '#btnRewriteAdopt':{disabled:false}, '#btnRewriteUndo':{disabled:true}, '#rewriteLen':{textContent:''},
   };
   const ctx=vm.createContext({
     document:{querySelector:s=>nodes[s]||null,createElement:()=>({}),body:{appendChild(){}}},
@@ -216,4 +218,14 @@ test('R3 explicitly empty draft does not resurrect saved text through switch or 
   await f.select('p1');await r2Flush();assert.equal(f.nodes['#copy'].value,'');
   await f.run('load()');assert.equal(f.nodes['#copy'].value,'');
   assert.equal(f.run('state.product.copy.text'),'原稿 A');assert.equal(f.run('state.draftByProduct.p1'),'');
+});
+
+test('R4 rewrite preview shows source and result length for voiceover duration',()=>{
+  const f=fixture();
+  f.nodes['#copy'].value='原稿内容需要保留原来的篇幅';
+  vm.runInContext("state.aiRewrite={productId:'p1',source:'原稿内容需要保留原来的篇幅',result:'改写以后也要保持差不多的篇幅',applied:false};renderRewritePreview()",f.ctx);
+  assert.equal(f.nodes['#rewritePreview'].hidden,false);
+  assert.equal(f.nodes['#rewriteLen'].textContent,'原稿 13 字 → 新稿 14 字');
+  vm.runInContext('state.aiRewrite.invalid=true;renderRewritePreview()',f.ctx);
+  assert.equal(f.nodes['#rewriteLen'].textContent,'');
 });

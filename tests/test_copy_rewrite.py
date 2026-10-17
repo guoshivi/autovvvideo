@@ -99,7 +99,9 @@ def test_r2_prompt_requires_removing_entire_risk_chain_not_synonyms():
     assert '删除整条症状、人群与体验因果链' in system
     assert '不能换成需要→使用→放松' in system
     assert '不得补写家人常备' in system
-    assert '不凑长度、不补卖点' in system
+    # Contract changed by the owner: a rewrite must keep roughly the same
+    # spoken length instead of collapsing to a label line.
+    assert '不得为了合规把整篇压缩成一两句' in system
 
 
 def test_r3_rewrite_prompt_forbids_unsupported_convenience_replacements():
@@ -108,6 +110,73 @@ def test_r3_rewrite_prompt_forbids_unsupported_convenience_replacements():
     assert '删除风险承诺后' in system
     assert '方便、省心、好用、舒适' in system
     assert '未证实评价' in system
-    assert '中性名称和查看标签及使用说明的建议' in system
+    assert '用原稿已有的中性内容补足篇幅' in system
     assert '不评价易用性、不新增功效或使用场景' in system
     assert '删除风险承诺后' not in aicopy.build_messages('polish', '原稿', {})[0]['content']
+
+
+def test_r4_rewrite_prompt_requires_keeping_spoken_length():
+    system = aicopy.build_messages('rewrite', '原稿内容需要保留原来的篇幅', {'name': '金门一条根'})[0]['content']
+    assert '90%–110%' in system
+    assert '不得为了合规把整篇压缩成一两句' in system
+    assert '不得补写卖点' in system
+    assert '免责提示最多一句' in system
+    assert '不能原样保留' in system and '不得劲' in system
+    assert '不得用活络油、红花油、止痛膏' in system
+    assert '90%–110%' not in aicopy.build_messages('polish', '原稿', {})[0]['content']
+
+
+def _choice(text, finish='stop'):
+    return {'choices': [{'message': {'content': text}, 'finish_reason': finish}]}
+
+
+def test_r4_rewrite_repairs_short_output_back_to_source_length(monkeypatch):
+    calls = []
+    src_line = '原稿内容需要保留原来的篇幅'
+    source = '\n'.join([src_line] * 5)
+    repaired = '\n'.join(['改写以后也要保持差不多的篇幅'] * 5)
+
+    def fake_post(url, payload, key, timeout=90):
+        calls.append(payload)
+        return _choice(repaired if len(calls) > 1 else '金门一条根\n查看使用说明')
+
+    monkeypatch.setattr(aicopy, '_post', fake_post)
+    out = aicopy.run('https://synthetic.invalid', 'TEST', 'stub', 'rewrite', source, {'name': '金门一条根'})
+    assert out == repaired
+    assert len(calls) == 2
+    repair_messages = calls[1]['messages']
+    assert repair_messages[0]['role'] == 'system'
+    assert repair_messages[-2] == {'role': 'assistant', 'content': '金门一条根\n查看使用说明'}
+    assert repair_messages[-1]['role'] == 'user'
+    note = repair_messages[-1]['content']
+    assert '篇幅差太多' in note and '只输出正文' in note
+    assert calls[1]['max_tokens'] == 6000 and calls[1]['temperature'] == 0.5
+    assert calls[1]['model'] == calls[0]['model'] == 'stub'
+
+
+def test_r4_rewrite_rejects_output_that_stays_far_too_short(monkeypatch):
+    calls = []
+
+    def fake_post(url, payload, key, timeout=90):
+        calls.append(payload)
+        return _choice('金门一条根\n查看使用说明')
+
+    monkeypatch.setattr(aicopy, '_post', fake_post)
+    with pytest.raises(aicopy.AIError, match='字数偏差过大'):
+        aicopy.run('https://synthetic.invalid', 'TEST', 'stub', 'rewrite', '原稿内容需要保留原来的篇幅' * 3, {})
+    assert len(calls) == 2
+
+
+def test_r4_rewrite_accepts_close_length_without_second_call(monkeypatch):
+    calls = []
+    source = '\n'.join(['原稿内容需要保留原来的篇幅'] * 4)
+    good = '\n'.join(['改写后篇幅基本保持一样长'] * 4)
+
+    def fake_post(url, payload, key, timeout=90):
+        calls.append(payload)
+        return _choice(good)
+
+    monkeypatch.setattr(aicopy, '_post', fake_post)
+    out = aicopy.run('https://synthetic.invalid', 'TEST', 'stub', 'rewrite', source, {})
+    assert out == good
+    assert len(calls) == 1
