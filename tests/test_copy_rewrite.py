@@ -122,7 +122,8 @@ def test_r4_rewrite_prompt_requires_keeping_spoken_length():
     assert '不得补写卖点' in system
     assert '免责提示最多一句' in system
     assert '不能原样保留' in system and '不得劲' in system
-    assert '不得用活络油、红花油、止痛膏' in system
+    assert '不得用活络油、红花油、止痛膏、药酒、药油、膏药' in system
+    assert '方子、药方、偏方' in system
     assert '90%–110%' not in aicopy.build_messages('polish', '原稿', {})[0]['content']
 
 
@@ -150,6 +151,7 @@ def test_r4_rewrite_repairs_short_output_back_to_source_length(monkeypatch):
     assert repair_messages[-1]['role'] == 'user'
     note = repair_messages[-1]['content']
     assert '篇幅差太多' in note and '只输出正文' in note
+    assert '膏药' in note and '老法子' in note and '老手艺' in note and '方子、药方、偏方' in note
     assert calls[1]['max_tokens'] == 6000 and calls[1]['temperature'] == 0.5
     assert calls[1]['model'] == calls[0]['model'] == 'stub'
 
@@ -179,4 +181,57 @@ def test_r4_rewrite_accepts_close_length_without_second_call(monkeypatch):
     monkeypatch.setattr(aicopy, '_post', fake_post)
     out = aicopy.run('https://synthetic.invalid', 'TEST', 'stub', 'rewrite', source, {})
     assert out == good
+    assert len(calls) == 1
+
+
+def test_r4_rewrite_repairs_banned_medical_words_even_when_length_matches(monkeypatch):
+    calls = []
+    source = '\n'.join(['家里老人平时用的东西要实在'] * 4)
+    dirty = '\n'.join(['家里老人平时用的东西要实在松快'] * 4)
+    clean = '\n'.join(['家里老人平时用的东西要实在'] * 4)
+
+    def fake_post(url, payload, key, timeout=90):
+        calls.append(payload)
+        return _choice(dirty if len(calls) == 1 else clean)
+
+    monkeypatch.setattr(aicopy, '_post', fake_post)
+    out = aicopy.run('https://synthetic.invalid', 'TEST', 'stub', 'rewrite', source, {})
+    assert out == clean
+    assert len(calls) == 2
+    note = calls[1]['messages'][-1]['content']
+    assert '松快' in note and '医疗或功效词' in note
+    assert '篇幅差太多' not in note and '篇幅保持不变' in note
+
+
+def test_r4_rewrite_rejects_banned_words_that_survive_repair(monkeypatch):
+    calls = []
+
+    def fake_post(url, payload, key, timeout=90):
+        calls.append(payload)
+        return _choice('\n'.join(['家里老人平时用的东西，贴上就酸胀缓解'] * 4))
+
+    monkeypatch.setattr(aicopy, '_post', fake_post)
+    with pytest.raises(aicopy.AIError, match='医疗或功效词'):
+        aicopy.run('https://synthetic.invalid', 'TEST', 'stub', 'rewrite', '\n'.join(['家里老人平时用的东西要实在'] * 4), {})
+    assert len(calls) == 2
+
+
+def test_r4_rewrite_length_band_is_080_to_120_and_single_char_sour_is_safe(monkeypatch):
+    source = '酸甜可口的小零食家里人都爱吃'
+    result = '酸甜可口的小零食，家里人都爱吃'
+    assert aicopy._rewrite_banned_hits(source) == []
+    assert aicopy._rewrite_banned_hits('酸甜') == []
+    assert aicopy._rewrite_banned_hits('酸胀') == ['酸胀']
+    assert aicopy._rewrite_length_ok('x' * 10, 'x' * 8) is True
+    assert aicopy._rewrite_length_ok('x' * 10, 'x' * 12) is True
+    assert aicopy._rewrite_length_ok('x' * 10, 'x' * 7) is False
+    assert aicopy._rewrite_length_ok('x' * 10, 'x' * 13) is False
+    calls = []
+
+    def fake_post(url, payload, key, timeout=90):
+        calls.append(payload)
+        return _choice(result)
+
+    monkeypatch.setattr(aicopy, '_post', fake_post)
+    assert aicopy.run('https://synthetic.invalid', 'TEST', 'stub', 'rewrite', source, {}) == result
     assert len(calls) == 1
