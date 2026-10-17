@@ -112,6 +112,7 @@ details.adv .advgrid{padding:2px 2px 12px}
 .copytext{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .daygroup{margin:0 0 10px}
 .pager{display:flex;align-items:center;gap:10px;margin:0 0 10px;flex-wrap:wrap}
+#secResults .pager button{min-width:44px;min-height:44px;white-space:nowrap}
 .pager .pageno{color:#475569;font-weight:650}
 .pager button:disabled{opacity:.4;cursor:default}
 .qfilter{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 8px}

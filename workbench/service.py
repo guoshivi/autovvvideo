@@ -1,5 +1,5 @@
 """Single persistent work queue and product-scoped application operations."""
-import threading,time,json,hashlib,urllib.request,subprocess,os,copy,shutil,io,dataclasses
+import threading,time,json,hashlib,urllib.request,subprocess,os,copy,shutil,io,dataclasses,stat
 from pathlib import Path
 from contextlib import contextmanager
 from .browser import FolderBrowser,AUDIO_EXT,VIDEO_EXT,overlaps,reject_links
@@ -934,16 +934,81 @@ class WorkbenchService:
             except Exception as e:
                 raise QueueCommitError('publication completed but queue terminal commit requires reconciliation',after_replace=True) from e
         try:
-            art=self.queue.get(jid).get('artifact') or {}
-            if self.get_prefs().get('cleanup_after_success') and isinstance(art,dict) and 'sha256' in art and 'bytes' in art:
-                out=Path(self.queue.get(jid).get('output') or '')
-                if out.is_file() and out.stat().st_size==art.get('bytes'):
-                    receipt=cleanup_job_dir(d,Path(getattr(self.cfg,'font_path','')).name)
-                    self.queue.update(jid,cleanup={'at':time.time(),'files':receipt.get('files',0),'bytes':receipt.get('bytes',0),'errors':receipt.get('errors',[])})
-                else:self.queue.update(jid,cleanup={'at':time.time(),'files':0,'bytes':0,'errors':['output receipt mismatch; cleanup skipped']})
+            receipt=self._cleanup_verified_export(jid)
+            cleanup_row={'at':time.time(),'files':receipt.get('files',0),
+                        'bytes':receipt.get('bytes',0),'errors':receipt.get('errors',[])}
+            try:
+                self.queue.update(jid,cleanup=cleanup_row)
+            except Exception as first:
+                # The media operation has already completed.  Retry once with
+                # the real counts intact; never replace an obtained receipt
+                # with fabricated zeroes after deletion.
+                retry=dict(cleanup_row)
+                retry['errors']=list(retry.get('errors') or [])+[f'cleanup receipt save failed: {first}']
+                try:
+                    self.queue.update(jid,cleanup=retry)
+                except Exception as second:
+                    # Keep a tiny local reconciliation record if both queue
+                    # writes fail.  It is deliberately just the honest receipt
+                    # and error chain; the successful job remains done.
+                    try:
+                        local=d/'cleanup-receipt.json'
+                        local.write_text(json.dumps(dict(retry,save_error=str(second)),ensure_ascii=False,indent=2),encoding='utf8')
+                    except Exception:
+                        pass
         except Exception as e:
-            try:self.queue.update(jid,cleanup={'at':time.time(),'files':0,'bytes':0,'errors':[str(e)]})
-            except Exception:pass
+            # Cleanup is best effort after publication; it must never turn a
+            # successfully exported job into a failed job.
+            try:
+                self.queue.update(jid,cleanup={'at':time.time(),'files':0,'bytes':0,'errors':[str(e)]})
+            except Exception:
+                pass
+
+    def _cleanup_verified_export(self,jid):
+        """Authorize local-final deletion only from an independently read row."""
+        skipped=lambda msg:{'files':0,'bytes':0,'errors':[msg]}
+        if not self.get_prefs().get('cleanup_after_success'):
+            return skipped('cleanup disabled; final media retained')
+        try:
+            memory=self.queue.get(jid)
+            raw=json.loads(self.queue.path.read_text(encoding='utf8'))
+            persisted=raw.get(jid) if isinstance(raw,dict) else None
+        except Exception as e:
+            return skipped(f'persisted done row readback failed: {e}')
+        # Compare the complete row, not just status, so a stale in-memory
+        # receipt or output path cannot authorize deletion.
+        if not isinstance(persisted,dict) or persisted!=memory:
+            return skipped('persisted done row readback mismatch; cleanup skipped')
+        if persisted.get('status')!='done':return skipped('job is not done; cleanup skipped')
+        artifact=persisted.get('artifact')
+        if not isinstance(artifact,dict) or type(artifact.get('bytes')) is not int or artifact.get('bytes')<0 or not isinstance(artifact.get('sha256'),str):
+            return skipped('output receipt missing; cleanup skipped')
+        out=Path(persisted.get('output') or '')
+        jobdir=self.queue.root/jid
+        try:
+            # These checks are lexical and lstat-based; deletion never follows
+            # a link.  The exported file must be outside this job directory.
+            reject_links(jobdir)
+            reject_links(out)
+            if overlaps(out,jobdir):return skipped('exported output is inside job directory; cleanup skipped')
+            # Refresh identities from the filesystem.  On Windows a cached
+            # DirEntry.stat can report zero dev/ino even when the native file
+            # identity is available and two paths are hardlinks.
+            ost=os.stat(out,follow_symlinks=False)
+            if not stat.S_ISREG(ost.st_mode):return skipped('exported output is not a regular file; cleanup skipped')
+            for p,st in iter_tree(jobdir):
+                if not stat.S_ISREG(st.st_mode):continue
+                try: fresh=os.stat(p,follow_symlinks=False)
+                except OSError as e:return skipped(f'job media identity unavailable; cleanup skipped: {e}')
+                if not (fresh.st_dev and fresh.st_ino and ost.st_dev and ost.st_ino):
+                    return skipped('file identity unavailable; cleanup skipped')
+                if (fresh.st_dev,fresh.st_ino)==(ost.st_dev,ost.st_ino):
+                    return skipped('exported output aliases job media; cleanup skipped')
+            if ost.st_size!=artifact['bytes'] or sha256(out)!=artifact['sha256']:
+                return skipped('output receipt mismatch; cleanup skipped')
+            return cleanup_job_dir(jobdir,Path(getattr(self.cfg,'font_path','')).name,verified_export=True)
+        except Exception as e:
+            return skipped(f'cleanup safety check failed: {e}')
 class _null:
     def __enter__(self):return None
     def __exit__(self,*a):return False

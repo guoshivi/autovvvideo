@@ -35,6 +35,11 @@ def iter_tree(root):
 
 def _safe_root(root):
     try:
+        # A link in an ancestor would make every lexical child point outside
+        # the job boundary.  Inspect the chain without resolving it.
+        for cur in (root,*root.parents):
+            st=cur.lstat()
+            if no_follow(st):return None
         st=root.lstat()
         return st if not no_follow(st) and root.is_dir() else None
     except OSError:return None
@@ -54,7 +59,13 @@ def _rmdir_quiet(path,errors):
     except OSError as e:
         if not _link_only_dir(path):errors.append(f'{path}: {e}')
 
-def cleanup_job_dir(jobdir,font_basename):
+def cleanup_job_dir(jobdir,font_basename,*,verified_export=False):
+    """Remove allow-listed intermediates.
+
+    ``verified_export`` is deliberately opt-in.  The service may set it only
+    after a completed job's persisted receipt and external output have been
+    independently verified; legacy callers continue to protect all finals.
+    """
     root=Path(jobdir);out={'files':0,'bytes':0,'errors':[]}
     if _safe_root(root) is None:return out
     def remove_file(p,st=None):
@@ -73,6 +84,28 @@ def cleanup_job_dir(jobdir,font_basename):
             target=(name==font_basename or fnmatch.fnmatch(name,'cut_*.mp4') or name=='draft.mp4' or fnmatch.fnmatch(name,'beauty-*') or fnmatch.fnmatch(name,'captioned-*') or fnmatch.fnmatch(name,'card_*.mp4') or fnmatch.fnmatch(name,'*.f32') or fnmatch.fnmatch(name,'*.f32.tmp'))
             if target:remove_file(p,st)
         except OSError as e:out['errors'].append(f'{p}: {e}')
+    if verified_export:
+        # Silent renders leave a root-level final.mp4.  Codec retries keep
+        # their encoder/QA media under final-codec/codec-*/; delete only the
+        # concrete names produced by the renderer, never an arbitrary subtree.
+        p=root/'final.mp4'
+        try:
+            st=p.lstat()
+            if stat.S_ISREG(st.st_mode) and not no_follow(st):remove_file(p,st)
+        except FileNotFoundError:pass
+        except OSError as e:out['errors'].append(f'{p.name}: {e}')
+        codec=root/'final-codec'
+        try:
+            cst=codec.lstat()
+            if not no_follow(cst) and stat.S_ISDIR(cst.st_mode):
+                known={'master.wav','audio.m4a','final.mp4','final-decoded.f32','final-decoded.f32.tmp'}
+                for p,st in iter_tree(codec):
+                    rel=p.relative_to(codec)
+                    if (stat.S_ISREG(st.st_mode) and p.name in known and len(rel.parts)==2
+                            and fnmatch.fnmatch(rel.parts[0],'codec-*')):
+                        remove_file(p,st)
+        except FileNotFoundError:pass
+        except OSError as e:out['errors'].append(f'{codec}: {e}')
     vi=root/'voice-intermediate';errors=out['errors']
     try:
         vst=vi.lstat()
