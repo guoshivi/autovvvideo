@@ -77,6 +77,12 @@ h3 .num{display:inline-flex;width:20px;height:20px;border-radius:50%;background:
 .modal.small{width:min(400px,92vw)}
 .modal.small .confirm{padding:20px 20px 6px;font-size:14px;line-height:1.7}
 .ai-row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:0 0 10px}
+.ai-row button,.ai-rewrite-panel button{min-height:44px}
+.ai-rewrite-panel{border:1px dashed var(--line);border-radius:10px;padding:10px 12px;margin:0 0 12px;background:#fbfcfe;max-width:100%;overflow:hidden}
+.ai-rewrite-panel label{display:block;margin-bottom:6px}
+.ai-rewrite-panel textarea{width:100%;max-width:100%;margin:0 0 8px;min-height:44px}
+.ai-rewrite-preview{margin-top:10px;border-top:1px solid var(--line);padding-top:10px;background:#f8fbf8}
+.ai-rewrite-preview pre{white-space:pre-wrap;word-break:break-word;margin:6px 0 10px;font-family:inherit;font-size:13px;line-height:1.7;max-height:320px;overflow:auto}
 .ai-panel{border:1px dashed var(--line);border-radius:10px;padding:12px 14px;margin:0 0 12px;background:#fbfcfe}
 .ai-row{flex-wrap:wrap}
 .ai-out{border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin:8px 0 12px;background:#f8fbf8}
