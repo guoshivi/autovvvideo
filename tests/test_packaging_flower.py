@@ -50,3 +50,11 @@ def test_prompt_mentions_every_style_and_flower_output():
     for style in flower_text.STYLES:
         assert f'{style}(' in packaging._SYSTEM
     assert '"flower"' in packaging._SYSTEM
+
+
+def test_forced_style_overrides_the_model_choice(monkeypatch):
+    from workbench import aicopy
+    payload = {'choices': [{'message': {'content': '{"flower":[{"line":1,"text":"一二三","style":"badge","side":"left"}]}'}, 'finish_reason': 'stop'}]}
+    monkeypatch.setattr(aicopy, '_post', lambda *a, **k: payload)
+    plan = packaging.plan(['一二三四五'], 'x', 'https://synthetic.invalid', 'TEST', 'stub', flower_style='burst_red')
+    assert plan['flower'][0]['style'] == 'burst_red'

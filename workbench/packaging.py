@@ -147,7 +147,7 @@ def _parse(text):
         return None
 
 
-def plan(lines, name, base_url, api_key, model, timeout=60, want_highlights=True, want_stickers=True, want_sfx=True, want_flower=True):
+def plan(lines, name, base_url, api_key, model, timeout=60, want_highlights=True, want_stickers=True, want_sfx=True, want_flower=True, flower_style='auto'):
     lines = [str(line or '') for line in (lines or [])]
     if not lines or not api_key:
         return validate(lines, {})
@@ -177,6 +177,9 @@ def plan(lines, name, base_url, api_key, model, timeout=60, want_highlights=True
     except Exception:
         return validate(lines, {})
     plan = validate(lines, _parse(text))
+    if flower_style in flower_text.STYLES:
+        for row in plan['flower']:
+            row['style'] = flower_style
     if not want_highlights: plan['highlights'] = [[] for _ in lines]
     if not want_stickers: plan['stickers'] = []
     if not want_flower: plan['flower'] = []

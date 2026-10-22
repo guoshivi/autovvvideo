@@ -4,6 +4,7 @@ from typing import Optional
 import math
 from .voice_engines import is_clone_voice_id
 from .subtitles import SUBTITLE_STYLES
+from .flower_text import STYLES as FLOWER_STYLES
 
 _DEDUP={'off','light','double'}
 _SPEAKERS={'Serena','Vivian','Uncle_Fu'}
@@ -42,7 +43,7 @@ def _check_cover(v):
 
 @dataclass(frozen=True)
 class ProductionSettings:
-    voice:bool=False;speaker:str='Serena';voice_engine:str='qwen';vox_voice:str='natural_female';subtitles:bool=True;subtitle_size:int=54;subtitle_bottom:int=380;subtitle_border:int=3;subtitle_style:str='classic';highlight_source:str='ai';subtitle_highlight:bool=True;sticker_enabled:bool=True;sfx_enabled:bool=True;flower_enabled:bool=True;bgm:bool=False;bgm_path:str='';bgm_volume:float=0.20;dedup:str='off';beauty:bool=False;beauty_strength:float=0.25;visual_filter:str='original';visual_filter_strength:float=0.35;speed:float=1.0;sentence_gap_seconds:Optional[float]=None;target_seconds:int=0;shot_reuse:int=1;cover:Optional[dict]=None;intro:Optional[dict]=None;outro:Optional[dict]=None;width:int=1080;height:int=1920;fps:int=30;codec:str='h264'
+    voice:bool=False;speaker:str='Serena';voice_engine:str='qwen';vox_voice:str='natural_female';subtitles:bool=True;subtitle_size:int=54;subtitle_bottom:int=380;subtitle_border:int=3;subtitle_style:str='classic';highlight_source:str='ai';subtitle_highlight:bool=True;sticker_enabled:bool=True;sfx_enabled:bool=True;flower_enabled:bool=True;flower_style:str='auto';bgm:bool=False;bgm_path:str='';bgm_volume:float=0.20;dedup:str='off';beauty:bool=False;beauty_strength:float=0.25;visual_filter:str='original';visual_filter_strength:float=0.35;speed:float=1.0;sentence_gap_seconds:Optional[float]=None;target_seconds:int=0;shot_reuse:int=1;cover:Optional[dict]=None;intro:Optional[dict]=None;outro:Optional[dict]=None;width:int=1080;height:int=1920;fps:int=30;codec:str='h264'
     @classmethod
     def from_dict(cls,d):
         if set(d)-set(cls.__dataclass_fields__):raise ValueError('unknown production setting')
@@ -64,6 +65,7 @@ class ProductionSettings:
         if type(self.subtitle_bottom) is not int or not 100<=self.subtitle_bottom<=800:raise ValueError('subtitle_bottom 100..800')
         if type(self.subtitle_border) is not int or not 0<=self.subtitle_border<=8:raise ValueError('subtitle_border 0..8')
         if self.subtitle_style not in SUBTITLE_STYLES:raise ValueError('subtitle_style must be legacy/classic/neon/peach/mint/orange/minimal')
+        if self.flower_style!='auto' and self.flower_style not in FLOWER_STYLES:raise ValueError('flower_style must be auto or a known flower style')
         if self.highlight_source not in ('ai','rules','manual'):raise ValueError('highlight_source must be ai/rules/manual')
         for k in ('subtitle_highlight','sticker_enabled','sfx_enabled','flower_enabled'):
             if type(getattr(self,k)) is not bool:raise ValueError(f'{k} must be boolean')

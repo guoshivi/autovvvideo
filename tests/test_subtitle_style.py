@@ -77,3 +77,14 @@ def test_flower_toggle_defaults_on_and_requires_bool():
     assert ProductionSettings.from_dict({'flower_enabled': False}).snapshot()['flower_enabled'] is False
     with pytest.raises(ValueError):
         ProductionSettings.from_dict({'flower_enabled': 'yes'})
+
+
+def test_flower_style_accepts_auto_or_menu_only():
+    from workbench.settings import ProductionSettings
+    from workbench.flower_text import STYLES
+    import pytest
+    assert ProductionSettings.from_dict({}).snapshot()['flower_style'] == 'auto'
+    for style in STYLES:
+        assert ProductionSettings.from_dict({'flower_style': style}).snapshot()['flower_style'] == style
+    with pytest.raises(ValueError):
+        ProductionSettings.from_dict({'flower_style': 'nope'})

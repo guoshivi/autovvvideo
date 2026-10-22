@@ -16,7 +16,7 @@ function make(style) {
     '#subStyle': {value: style}, '#shotReuse': {value: '1'}, '#dedup': {value: 'off'}, '#beauty': {checked: false},
     '#beautyStrength': {value: '.25'}, '#visualFilter': {value: 'original'}, '#visualFilterStrength': {value: '.35'},
     '#sentenceGapMode': {value: 'auto'}, '#sentenceGap': {value: ''},
-    '#hlOn': {checked: true}, '#stickerOn': {checked: true}, '#sfxOn': {checked: true}, '#flowerOn': {checked: true},
+    '#hlOn': {checked: true}, '#stickerOn': {checked: true}, '#sfxOn': {checked: true}, '#flowerOn': {checked: true}, '#flowerStyle': {value: 'burst_red'},
   };
   const ctx = vm.createContext({document: {querySelector: (s) => nodes[s] || null}, window: {}, console, setTimeout: (fn) => { fn(); return 0; }, clearTimeout, AbortController, fetch: () => { throw Error('unexpected fetch'); }});
   vm.runInContext(source, ctx);
@@ -78,4 +78,16 @@ test('flower text has its own on/off checkbox and defaults on', () => {
   assert.equal(vm.runInContext('collectSettings().flower_enabled', f.ctx), true);
   f.nodes['#flowerOn'].checked = false;
   assert.equal(vm.runInContext('collectSettings().flower_enabled', f.ctx), false);
+});
+
+
+test('flower style picker lists auto plus every style and is sent through', () => {
+  const f = make('classic');
+  vm.runInContext('renderScript()', f.ctx);
+  const html = f.nodes['#secScript'].innerHTML;
+  assert.match(html, /id="flowerStyle"/);
+  for (const value of ['auto', 'burst_red', 'burst_orange', 'glow_title', 'bottom_glow', 'badge', 'tape', 'bubble', 'neon', 'brush', 'shadow3d']) {
+    assert.match(html, new RegExp(`value="${value}"`));
+  }
+  assert.equal(vm.runInContext('collectSettings().flower_style', f.ctx), 'burst_red');
 });
