@@ -1,8 +1,15 @@
 # 第三方组件与许可说明（THIRD PARTY NOTICES）
 
-本仓库**只包含自有源码与文档**，不包含任何第三方二进制、模型权重或字体。
+本仓库只包含自有源码、文档，以及下列**明确许可**的贴图素材；不包含第三方二进制、模型权重或字体。
 下列组件全部在**安装时**从官方/公示来源下载（地址与校验值见 `deploy/dependencies.json`）。
 各组件的许可与注意如下；如计划对外再分发本工具或其下载物，请先阅读对应条目。
+
+## 随仓库分发的素材
+
+| 素材 | 来源 | 许可 |
+|---|---|---|
+| `workbench/assets/stickers/*.png` | Microsoft Fluent Emoji（github.com/microsoft/fluentui-emoji） | MIT，见同目录 LICENSE |
+| `workbench/assets/sfx/*.wav` | 本项目用 FFmpeg 合成（正弦波/噪声），未使用第三方样本 | 随本项目分发 |
 
 ## 工具类
 

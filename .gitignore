@@ -28,6 +28,7 @@ __pycache__/
 *.mov
 *.mkv
 *.wav
+!workbench/assets/sfx/*.wav
 *.mp3
 *.m4a
 *.aac

@@ -21,7 +21,7 @@ def _write_wav(path, samples, value=1200):
         f.writeframes(pcm.tobytes())
 
 
-def _render_job(tmp_path, *, gap=None, voice=True, lines=("甲", "乙"), candidate_seconds=6.0, sample_counts=None):
+def _render_job(tmp_path, *, gap=None, voice=True, lines=("甲", "乙"), candidate_seconds=6.0, sample_counts=None, sfx=None, full=False):
     from workbench import renderer
     from workbench.media import sha256
 
@@ -42,11 +42,15 @@ def _render_job(tmp_path, *, gap=None, voice=True, lines=("甲", "乙"), candida
     candidate = {"path": str(source), "start": 0.0, "seconds": candidate_seconds,
                  "source_sha256": sha256(source), "index_id": "fixture"}
     settings = {"voice": voice, "subtitles": False, "beauty": False,
-                "shot_reuse": 0, "dedup": "off", "visual_filter": "original"}
+                "shot_reuse": 0, "dedup": "off", "visual_filter": "original",
+                "bgm": False, "bgm_path": "", "bgm_volume": -18}
     if gap is not None:
         settings["sentence_gap_seconds"] = gap
     job = {"lines": list(lines), "mapping": [[candidate] for _ in lines],
            "voices": voices if voice else [], "variant": 0, "settings": settings}
+    if sfx:
+        job["sfx"] = sfx
+        job["stickers"] = []
 
     class Config:
         ffmpeg = "ffmpeg"
@@ -55,6 +59,8 @@ def _render_job(tmp_path, *, gap=None, voice=True, lines=("甲", "乙"), candida
         project_src = str(tmp_path)
         font_path = ""
 
+    if full:
+        return renderer.render_job(job, Config(), tmp_path)
     result = renderer.render_video(job, Config(), tmp_path)
     return result, voices
 
@@ -229,3 +235,13 @@ def test_verify_explicit_gap_branch_reports_requested_and_actual(tmp_path, monke
     import workbench.media as media
     monkeypatch.setattr(media, "sha256", lambda p: "x")
     media.validate_report(report, path)
+
+
+def test_sfx_only_without_voice_renders_master(tmp_path):
+    (draft, timeline, master, wavs), voices = _render_job(
+        tmp_path / "job", voice=False, lines=("第一句", "第二句"),
+        sfx=[{"line": 1, "sound": "ding", "gain": -6}],
+    )
+    assert Path(draft).is_file()
+    assert wavs == []
+    assert float(np.max(np.abs(master))) == 0  # SFX is mixed in render_job, not here

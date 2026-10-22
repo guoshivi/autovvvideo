@@ -115,7 +115,10 @@ def verify_media(path,ffmpeg,ffprobe,timeline,expected=None,voice_wavs=None,mode
         # including short residual blocks. The padded master is only used for
         # mixed expected-mix validation.
         x=voice_samples[i] if (voice_wavs and mode=='voice') else expected[start:end]
-        if not len(x) or (not np.any(x) and mode not in ('bgm',)):
+        if mode=='bgm' and len(x) and not np.any(x):
+            correlations.append({'index':i,'ok':True,'skipped':'silent interval'})
+            continue
+        if not len(x) or not np.any(x):
             raise VerificationFailure('verify','expected interval',i,'finite nonzero samples',i)
         got=correlate_pcm(x,decoded,start);got['index']=i;correlations.append(got)
         if got.get('ok') is not True:

@@ -9,6 +9,8 @@ from .copy_tools import clean_punctuation, parse_script_variants
 from .timing import estimate_timing
 from .indexer import Indexer,ProductionEmbedder,collect_source_fingerprints,expected_files_unchanged
 from .renderer import render_job,export_numbered
+from . import highlight_ai, packaging
+from .subtitles import is_ass_style
 from .selection import spread_candidates
 from .aicopy import run as ai_run,AIError
 from .ai_endpoint import normalize_endpoint
@@ -19,6 +21,11 @@ from .queue import CommitError as QueueCommitError
 from .cleanup import cleanup_job_dir,remove_job_dir,iter_tree
 from .voice_engines import (VoiceEngineError, VOX_PRESETS, require_vox_config, require_qwen_config,
                             list_clone_voices, resolve_clone_voice, validate_preview_payload, opaque_preview_id)
+
+def _safe_highlights(value,count):
+    if not isinstance(value,list) or len(value)!=count or not all(isinstance(x,list) for x in value):
+        return [[] for _ in range(count)]
+    return [[str(w) for w in row] for row in value]
 
 class ServiceError(ValueError):pass
 def _render_dest_name(product,job_input,job_id):
@@ -875,6 +882,39 @@ class WorkbenchService:
                 self.queue.update(j['id'],status='done',stage='indexed',progress=100,index_id=rec['id'],indexed=len(rec['files']),total=len(rec['files'])+len(skipped_public),skipped=len(skipped_public),skipped_files=skipped_public,condition=commit)
             except Exception as e:
                 raise QueueCommitError('index stored but queue terminal commit requires reconciliation',after_replace=True) from e
+    def _prepare_highlights(self,j,p,d,x):
+        """Freeze one AI packaging plan (highlights/stickers/sfx) into the job."""
+        s=x['settings']
+        x['highlights']=[];x['stickers']=[];x['sfx']=[]
+        source=s.get('highlight_source') or 'ai'
+        want_st=bool(s.get('sticker_enabled',True))
+        want_sfx=bool(s.get('sfx_enabled',True))
+        want_hl=bool(s.get('subtitles')) and is_ass_style(s.get('subtitle_style')) and source=='ai' and bool(s.get('subtitle_highlight',True))
+        if not (want_hl or want_st or want_sfx):
+            return
+        cache=d/'packaging.json'
+        if cache.is_file():
+            try:
+                cached=json.loads(cache.read_text(encoding='utf8'))
+                plan=cached.get('plan') if isinstance(cached,dict) else {}
+                plan=plan if isinstance(plan,dict) else {}
+                x['highlights']=_safe_highlights(plan.get('highlights'),len(x['lines'])) if want_hl else [[] for _ in x['lines']]
+                x['stickers']=plan.get('stickers') if isinstance(plan.get('stickers'),list) and want_st else []
+                x['sfx']=plan.get('sfx') if isinstance(plan.get('sfx'),list) and want_sfx else []
+                return
+            except (OSError,ValueError):
+                pass
+        base,key,model=highlight_ai.credentials(self.cfg)
+        try:
+            plan=packaging.plan(x['lines'],p.get('name') or '',base,key,model,want_highlights=want_hl,want_stickers=want_st,want_sfx=want_sfx)
+        except Exception:
+            plan={'highlights':[[] for _ in x['lines']],'stickers':[],'sfx':[]}
+        if any(plan.get('highlights') or []) or plan.get('stickers') or plan.get('sfx'):
+            cache.write_text(json.dumps({'source':'ai','plan':plan},ensure_ascii=False),encoding='utf8')
+        x['highlights']=plan.get('highlights') or []
+        x['stickers']=plan.get('stickers') or []
+        x['sfx']=plan.get('sfx') or []
+
     def _run_render(self,j,cancel):
         x=j['input'];p=self.store.get_product(j['product_id'])
         rec=self.store.get_index(x['index_id'])
@@ -905,6 +945,7 @@ class WorkbenchService:
         x['variant']=j['variant'];x['selection_rank']=x.get('selection_rank',j.get('selection_rank',j['variant']));x['input_sha256']=j['input_sha256'];x['bgm_sha256']=x.get('bgm_sha256')
         self.queue.update(jid,stage='render',progress=20)
         def progress(n,total):self.queue.update(jid,stage='render',progress=20+round(50*n/total))
+        self._prepare_highlights(j,p,d,x)
         final,report=render_job(x,self.cfg,d,cancel,progress)
         if x['settings']['voice']:
             worker=Path(self.cfg.project_src)/'workbench'/('voxcpm_worker.py' if engine=='vox' else 'tts_worker.py')
