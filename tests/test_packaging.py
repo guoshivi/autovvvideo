@@ -50,7 +50,7 @@ def test_plan_parses_and_validates_model_json(monkeypatch):
 def test_plan_falls_back_to_empty_on_bad_json(monkeypatch):
     monkeypatch.setattr(aicopy, '_post', lambda *a, **k: {'choices': [{'message': {'content': '不是 JSON'}, 'finish_reason': 'stop'}]})
     plan = packaging.plan(['一句'], 'x', 'https://synthetic.invalid', 'TEST', 'stub')
-    assert plan == {'highlights': [[]], 'stickers': [], 'sfx': []}
+    assert plan == {'highlights': [[]], 'stickers': [], 'sfx': [], 'flower': []}
 
 
 def test_plan_flags_drop_disabled_categories(monkeypatch):

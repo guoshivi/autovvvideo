@@ -16,7 +16,7 @@ function make(style) {
     '#subStyle': {value: style}, '#shotReuse': {value: '1'}, '#dedup': {value: 'off'}, '#beauty': {checked: false},
     '#beautyStrength': {value: '.25'}, '#visualFilter': {value: 'original'}, '#visualFilterStrength': {value: '.35'},
     '#sentenceGapMode': {value: 'auto'}, '#sentenceGap': {value: ''},
-    '#hlOn': {checked: true}, '#stickerOn': {checked: true}, '#sfxOn': {checked: true},
+    '#hlOn': {checked: true}, '#stickerOn': {checked: true}, '#sfxOn': {checked: true}, '#flowerOn': {checked: true},
   };
   const ctx = vm.createContext({document: {querySelector: (s) => nodes[s] || null}, window: {}, console, setTimeout: (fn) => { fn(); return 0; }, clearTimeout, AbortController, fetch: () => { throw Error('unexpected fetch'); }});
   vm.runInContext(source, ctx);
@@ -67,4 +67,15 @@ test('unchecked switches are sent as false', () => {
   assert.equal(s.sticker_enabled, false);
   assert.equal(s.sfx_enabled, false);
   assert.equal(s.subtitle_highlight, true);
+});
+
+
+test('flower text has its own on/off checkbox and defaults on', () => {
+  const f = make('classic');
+  vm.runInContext('renderScript()', f.ctx);
+  assert.match(f.nodes['#secScript'].innerHTML, /id="flowerOn"/);
+  assert.match(f.nodes['#secScript'].innerHTML, /花字/);
+  assert.equal(vm.runInContext('collectSettings().flower_enabled', f.ctx), true);
+  f.nodes['#flowerOn'].checked = false;
+  assert.equal(vm.runInContext('collectSettings().flower_enabled', f.ctx), false);
 });

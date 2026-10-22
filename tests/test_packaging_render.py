@@ -73,3 +73,24 @@ def test_missing_sfx_asset_fails_loudly():
     master.setflags(write=False)
     with pytest.raises(ValueError, match='sfx missing'):
         renderer._mix_sfx(master, [{'line': 1, 'sound': 'not-a-sound'}], [{'start': 0.0, 'end': 1.0}], [])
+
+
+def test_flower_windows_and_overlay(monkeypatch, tmp_path):
+    captured = {}
+    monkeypatch.setattr(renderer, '_command', lambda args, cwd, timeout, cancel: captured.update(args=args))
+    monkeypatch.setattr(renderer, '_probe_duration', lambda ffprobe, path: 6.0)
+    timeline = [{'start': 0.0, 'end': 3.0}, {'start': 3.0, 'end': 6.0}]
+    flower = [{'line': 1, 'text': '中老年人', 'style': 'burst_red', 'side': 'right'}]
+    cfg = type('C', (), {'ffmpeg': 'ff', 'ffprobe': 'fp', 'max_stage_seconds': 10, 'font_path': ''})()
+    renderer._apply_flower(cfg, 'draft.mp4', flower, timeline, 380, tmp_path, None)
+    args = captured['args']
+    assert (tmp_path / 'flower-01.png').is_file()
+    graph = args[args.index('-filter_complex') + 1]
+    assert "enable='gte(t,0.150)*lt(t," in graph
+    assert '[fl1]' in graph
+
+
+def test_flower_windows_follow_the_sentence_slot():
+    timeline = [{'start': 0.0, 'end': 2.0}, {'start': 2.0, 'end': 6.0}]
+    rows = renderer._flower_windows([{'line': 2, 'text': '上班族', 'style': 'badge', 'side': 'left'}], timeline)
+    assert rows == [('上班族', 'badge', 'left', 2.15, 3.75)]

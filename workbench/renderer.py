@@ -11,6 +11,7 @@ from .pacing import SENTENCE_GAP_SECONDS,voice_slot_seconds,sentence_slot_second
 from reference.core.videopipe.caption import drawtext_filter,wrap_caption
 from .filters import ffmpeg_filter
 from .subtitles import build_ass,is_ass_style
+from . import flower_text
 
 PHASE_PREFIXES=(0,64,128,192,256,384,512,640,768,896)
 MIX_SOFT_START=0.79  # soft-knee start (linear), below MIX_CEILING
@@ -317,6 +318,51 @@ def _sticker_windows(stickers,timeline):
         rows.append((s.get('icon'),'left' if s.get('side')=='left' else 'right',a,b))
     return rows
 
+def _flower_windows(flower,timeline):
+    rows=[]
+    for item in flower or []:
+        i=int(item.get('line') or 0)-1
+        if not 0<=i<len(timeline):continue
+        slot=timeline[i]
+        start=slot['start']+0.15
+        dur=min(1.6,max(0.9,(slot['end']-slot['start'])*0.5))
+        end=min(slot['end'],start+dur)
+        if end-start<.3:continue
+        rows.append((item['text'],item['style'],item.get('side') or 'right',start,end))
+    return rows
+
+def _apply_flower(config,draft,flower,timeline,bottom,d,cancel):
+    windows=_flower_windows(flower,timeline)
+    if not windows:return draft
+    total=round(timeline[-1]['end']*30)
+    args=[config.ffmpeg,'-nostdin','-y','-v','error','-i',str(draft)]
+    sizes=[]
+    for n,(text,style,side,_,_) in enumerate(windows,start=1):
+        path=d/f'flower-{n:02d}.png'
+        im=flower_text.render(text,style,font_path=getattr(config,'font_path','') or None)
+        im.save(path,'PNG')
+        args+=['-loop','1','-i',str(path)]
+        sizes.append(im.size)
+    chains=[]
+    prev='[0:v]'
+    for n,(text,style,side,a,b) in enumerate(windows,start=1):
+        w,h=sizes[n-1]
+        limit=int(1080*0.82) if style in ('glow_title','bottom_glow') else int(1080*0.44)
+        if w>limit:
+            ratio=limit/w;w=int(w*ratio);h=int(h*ratio)
+        chains.append(f'[{n}:v]scale={w}:{h}[fl{n}]')
+        if style=='glow_title':x=(1080-w)//2;y=150
+        elif style=='bottom_glow':x=(1080-w)//2;y=max(200,1920-int(bottom)-h-70)
+        else:x=70 if side=='left' else 1080-w-70;y=760
+        y=max(60,min(y,1920-int(bottom)-h-20))
+        chains.append(f"{prev}[fl{n}]overlay=x={x}:y={y}:enable='gte(t,{a:.3f})*lt(t,{b:.3f})'[fv{n}]")
+        prev=f'[fv{n}]'
+    out=d/'draft-flower.mp4'
+    args+=['-filter_complex',';'.join(chains),'-map',prev,'-an','-c:v','libx264','-preset','veryfast','-crf','18','-r','30','-frames:v',str(total),'-pix_fmt','yuv420p',str(out)]
+    _command(args,d,config.max_stage_seconds,cancel)
+    if abs(_probe_duration(config.ffprobe,out)-timeline[-1]['end'])>1/30+.001:raise ValueError('render/flower duration mismatch')
+    return out
+
 def _apply_stickers(config,draft,stickers,timeline,bottom,d,cancel):
     windows=_sticker_windows(stickers,timeline)
     if not windows:return draft
@@ -370,6 +416,7 @@ def render_job(job,config,jobdir,cancel=None,progress=None):
     d=Path(jobdir);bound=_bind_voice_sources(job,d);draft,timeline,voice_master,wavs,beauty_reports=render_video(job,config,d,cancel,progress,_voice_binding=bound,_return_beauty=True);s=job['settings']
     receipts=[v[1] for v in bound];frozen_pcm=tuple(v[2] for v in bound)
     if job.get('stickers') and s.get('sticker_enabled',True):draft=_apply_stickers(config,draft,job['stickers'],timeline,s['subtitle_bottom'],d,cancel)
+    if job.get('flower') and s.get('flower_enabled',True):draft=_apply_flower(config,draft,job['flower'],timeline,s['subtitle_bottom'],d,cancel)
     sfx_on=bool(job.get('sfx')) and s.get('sfx_enabled',True)
     master=_mix_sfx(voice_master,job['sfx'],timeline,job.get('stickers')) if sfx_on else voice_master
     engine=s.get('voice_engine','qwen')
@@ -415,7 +462,7 @@ def render_job(job,config,jobdir,cancel=None,progress=None):
     if 'sentence_gap_seconds' in s:report['sentence_gap_seconds']=s.get('sentence_gap_seconds')
     if mix_fit:report['mix_fit']=mix_fit
     report['shot_usage']=shot_usage(timeline)
-    if (job.get('stickers') and s.get('sticker_enabled',True)) or (job.get('sfx') and s.get('sfx_enabled',True)):report['packaging']={'stickers':_sticker_windows(job.get('stickers'),timeline),'sfx':job.get('sfx')}
+    if (job.get('stickers') and s.get('sticker_enabled',True)) or (job.get('sfx') and s.get('sfx_enabled',True)) or (job.get('flower') and s.get('flower_enabled',True)):report['packaging']={'stickers':_sticker_windows(job.get('stickers'),timeline),'flower':_flower_windows(job.get('flower'),timeline),'sfx':job.get('sfx')}
     if job.get('selection_context'):report['selection_context']=copy.deepcopy(job['selection_context'])
     if s.get('beauty'):report['beauty']={'enabled':True,'frames':sum(x.get('frames',0) for x in beauty_reports),'frames_with_faces':sum(x.get('frames_with_faces',0) for x in beauty_reports),'faces_detected':sum(x.get('faces_detected',0) for x in beauty_reports),'no_op':not any(x.get('faces_detected',0) for x in beauty_reports)}
     cover_meta=s.get('cover')

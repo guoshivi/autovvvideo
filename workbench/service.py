@@ -885,12 +885,13 @@ class WorkbenchService:
     def _prepare_highlights(self,j,p,d,x):
         """Freeze one AI packaging plan (highlights/stickers/sfx) into the job."""
         s=x['settings']
-        x['highlights']=[];x['stickers']=[];x['sfx']=[]
+        x['highlights']=[];x['stickers']=[];x['sfx']=[];x['flower']=[]
         source=s.get('highlight_source') or 'ai'
         want_st=bool(s.get('sticker_enabled',True))
         want_sfx=bool(s.get('sfx_enabled',True))
+        want_fl=bool(s.get('flower_enabled',True))
         want_hl=bool(s.get('subtitles')) and is_ass_style(s.get('subtitle_style')) and source=='ai' and bool(s.get('subtitle_highlight',True))
-        if not (want_hl or want_st or want_sfx):
+        if not (want_hl or want_st or want_sfx or want_fl):
             return
         cache=d/'packaging.json'
         if cache.is_file():
@@ -901,19 +902,21 @@ class WorkbenchService:
                 x['highlights']=_safe_highlights(plan.get('highlights'),len(x['lines'])) if want_hl else [[] for _ in x['lines']]
                 x['stickers']=plan.get('stickers') if isinstance(plan.get('stickers'),list) and want_st else []
                 x['sfx']=plan.get('sfx') if isinstance(plan.get('sfx'),list) and want_sfx else []
+                x['flower']=plan.get('flower') if isinstance(plan.get('flower'),list) and want_fl else []
                 return
             except (OSError,ValueError):
                 pass
         base,key,model=highlight_ai.credentials(self.cfg)
         try:
-            plan=packaging.plan(x['lines'],p.get('name') or '',base,key,model,want_highlights=want_hl,want_stickers=want_st,want_sfx=want_sfx)
+            plan=packaging.plan(x['lines'],p.get('name') or '',base,key,model,want_highlights=want_hl,want_stickers=want_st,want_sfx=want_sfx,want_flower=want_fl)
         except Exception:
-            plan={'highlights':[[] for _ in x['lines']],'stickers':[],'sfx':[]}
-        if any(plan.get('highlights') or []) or plan.get('stickers') or plan.get('sfx'):
+            plan={'highlights':[[] for _ in x['lines']],'stickers':[],'sfx':[],'flower':[]}
+        if any(plan.get('highlights') or []) or plan.get('stickers') or plan.get('sfx') or plan.get('flower'):
             cache.write_text(json.dumps({'source':'ai','plan':plan},ensure_ascii=False),encoding='utf8')
         x['highlights']=plan.get('highlights') or []
         x['stickers']=plan.get('stickers') or []
         x['sfx']=plan.get('sfx') or []
+        x['flower']=plan.get('flower') or []
 
     def _run_render(self,j,cancel):
         x=j['input'];p=self.store.get_product(j['product_id'])

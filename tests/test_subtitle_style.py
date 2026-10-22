@@ -68,3 +68,12 @@ def test_three_feature_toggles_default_on_and_validate_boolean():
 def test_beauty_without_subtitles_produces_no_caption_filter():
     settings = ProductionSettings(subtitles=False, beauty=True).snapshot()
     assert renderer._caption_vf(settings, None, None, 'msyh.ttc') is None
+
+
+def test_flower_toggle_defaults_on_and_requires_bool():
+    from workbench.settings import ProductionSettings
+    import pytest
+    assert ProductionSettings.from_dict({}).snapshot()['flower_enabled'] is True
+    assert ProductionSettings.from_dict({'flower_enabled': False}).snapshot()['flower_enabled'] is False
+    with pytest.raises(ValueError):
+        ProductionSettings.from_dict({'flower_enabled': 'yes'})
