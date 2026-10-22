@@ -117,6 +117,18 @@ class PipelineTests(unittest.TestCase):
         idx = _PipeIndexer(self.idx, rec, **kw)
         return idx.build('pid', str(self.src), {'sample_seconds': 10}, 'model:v1')
 
+    def test_record_keeps_user_source_spelling(self):
+        # A mapped drive must stay "Z:\..." in the published record: the store
+        # compares it byte-for-byte with the product's selected path. Resolving
+        # it to the UNC target made every NAS index fail with
+        # "索引来源与商品不符".
+        rec = self._build()
+        self.assertEqual(rec['source'], str(self.src))
+
+    def test_source_match_ignores_resolved_spelling(self):
+        from workbench.indexer import _same_source
+        self.assertTrue(_same_source(str(self.src), str(self.src.resolve())))
+
     def test_slices_run_in_parallel(self):
         self._build()
         self.assertGreaterEqual(self.rec.max_clip_depth, 2,

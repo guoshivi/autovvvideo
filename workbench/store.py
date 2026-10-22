@@ -113,7 +113,7 @@ class Store:
         assert_mutation_allowed()
         with self.lock:
             p=copy.deepcopy(self.data['products'][pid])
-            if not p['source'] or p['source']['path']!=rec['source'] or rec['product_id']!=pid:raise ValueError('索引来源与商品不符')
+            if not p['source'] or p['source']['path']!=rec['source'] or rec['product_id']!=pid:raise ValueError(f"索引来源与商品不符 [pid={pid!r} rec_pid={rec.get('product_id')!r} product_source={(p.get('source') or {}).get('path')!r} rec_source={rec.get('source')!r}]")
             old=self.data['indexes'].get(rec['id'])
             if old is not None and old != rec: raise ValueError('已出版索引不可变异')
             if not self._source_matches(rec,p):raise ValueError('索引提交时素材集合或指纹已变化')

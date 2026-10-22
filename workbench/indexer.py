@@ -3,6 +3,9 @@ import hashlib,json,time,uuid,os,copy,math,subprocess,shutil
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor, wait as futures_wait
 from .browser import FolderBrowser,VIDEO_EXT,reject_links
+def _same_source(a,b):
+    try:return os.path.normcase(str(Path(a).resolve()))==os.path.normcase(str(Path(b).resolve()))
+    except OSError:return os.path.normcase(str(a))==os.path.normcase(str(b))
 class FakeEmbedder:
     """Synthetic fixtures only. Never constructed by application startup."""
     synthetic=True
@@ -289,13 +292,13 @@ class Indexer:
     def _encode(self,payloads):
         return encode_many(self.embedder,payloads)
     def build(self,product_id,source,settings,model_identity,progress=None,cancel=None,pause=None,on_pause=None,on_resume=None,baseline=None):
-        src=Path(source).resolve();reject_links(src); files=self._files(src)
+        src=Path(source).resolve();reject_links(src); source_ref=str(source); files=self._files(src)
         if not files:raise ValueError('index/scan: 选定目录没有可索引视频')
         # Incremental reuse: when the previous index for the same folder/model
         # exists, files whose fingerprint is byte-identical keep their blocks
         # and are skipped entirely (no probe, no GPU embedding).
         prev={}
-        if isinstance(baseline,dict) and baseline.get('source')==str(src) and baseline.get('model_identity')==model_identity and (baseline.get('settings') or {}).get('sample_seconds')==(settings or {}).get('sample_seconds'):
+        if isinstance(baseline,dict) and _same_source(baseline.get('source'),src) and baseline.get('model_identity')==model_identity and (baseline.get('settings') or {}).get('sample_seconds')==(settings or {}).get('sample_seconds'):
             prev={e['fingerprint']['path']:e for e in baseline.get('files',[]) if isinstance(e,dict) and isinstance(e.get('fingerprint'),dict) and 'blocks' in e}
         # Resume: progress journalled by an earlier attempt for this exact
         # source/model/sampling wins over the older published baseline because it
@@ -384,7 +387,7 @@ class Indexer:
             if groups or queue:raise ValueError('index/pipeline: internal error, unfinished windows remain')
             if not entries:raise ValueError('index/scan: 所有素材都无法解析（'+'; '.join(s['name'] for s in skipped[:5])+'）')
             ordered=[entries[i] for i in sorted(entries)]
-            rec={'id':rid,'product_id':product_id,'source':str(src),'settings':copy.deepcopy(settings),'model_identity':model_identity,'synthetic':bool(getattr(self.embedder,'synthetic',False)),'count':len(ordered),'reused':reused,'skipped':skipped,'files':ordered,'created_at':time.time()}
+            rec={'id':rid,'product_id':product_id,'source':source_ref,'settings':copy.deepcopy(settings),'model_identity':model_identity,'synthetic':bool(getattr(self.embedder,'synthetic',False)),'count':len(ordered),'reused':reused,'skipped':skipped,'files':ordered,'created_at':time.time()}
             now=[self._fp(p) for p in self._files(src)]
             if not expected_files_unchanged([e['fingerprint'] for e in ordered],now):
                 raise ValueError('index/source changed during build')
