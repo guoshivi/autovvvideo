@@ -22,10 +22,10 @@ def test_unknown_style_falls_back_to_a_menu_style():
     assert len(rows) == 1 and rows[0]['style'] in flower_text.STYLES
 
 
-def test_caps_density_at_one_per_four_lines():
-    lines = ['一二三四五'] * 8
-    data = {'flower': [{'line': i, 'text': '一二三', 'style': 'badge'} for i in range(1, 9)]}
-    assert len(packaging.validate(lines, data)['flower']) == 2
+def test_caps_density_at_one_per_three_lines():
+    lines = ['一二三四五'] * 7
+    data = {'flower': [{'line': i, 'text': '一二三', 'style': 'badge'} for i in range(1, 8)]}
+    assert len(packaging.validate(lines, data)['flower']) == 3
 
 
 def test_rejects_medical_claims_even_when_the_phrase_is_neutral():
@@ -40,10 +40,10 @@ def test_rejects_quotes_and_ellipsis():
         assert packaging.validate(lines, {'flower': [{'line': 1, 'text': text, 'style': 'badge'}]})['flower'] == []
 
 
-def test_five_lines_allow_only_one_flower():
+def test_five_lines_allow_two_flowers():
     lines = ['一二三四五'] * 5
     data = {'flower': [{'line': i, 'text': '一二三', 'style': 'badge'} for i in range(1, 6)]}
-    assert len(packaging.validate(lines, data)['flower']) == 1
+    assert len(packaging.validate(lines, data)['flower']) == 2
 
 
 def test_prompt_mentions_every_style_and_flower_output():
@@ -58,3 +58,12 @@ def test_forced_style_overrides_the_model_choice(monkeypatch):
     monkeypatch.setattr(aicopy, '_post', lambda *a, **k: payload)
     plan = packaging.plan(['一二三四五'], 'x', 'https://synthetic.invalid', 'TEST', 'stub', flower_style='burst_red')
     assert plan['flower'][0]['style'] == 'burst_red'
+
+
+def test_density_controls_the_cap():
+    lines = ['一二三四五'] * 7
+    data = {'flower': [{'line': i, 'text': '一二三', 'style': 'badge'} for i in range(1, 8)]}
+    assert len(packaging.validate(lines, data, 'low')['flower']) == 2
+    assert len(packaging.validate(lines, data, 'normal')['flower']) == 3
+    assert len(packaging.validate(lines, data, 'high')['flower']) == 4
+    assert len(packaging.validate(lines, data, 'max')['flower']) == 7

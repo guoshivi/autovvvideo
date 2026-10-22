@@ -23,6 +23,7 @@ ICON_MEANINGS = {
 }
 ICONS = tuple(ICON_MEANINGS)
 SOUNDS = ('ding', 'pop', 'whoosh', 'click', 'coin', 'success')
+FLOWER_DENSITY = {'low': 4, 'normal': 3, 'high': 2, 'max': 1}
 
 _SYSTEM = (
     '你是短视频包装编辑。给你按行编号的口播文案，请一次给出三样东西：'
@@ -33,7 +34,7 @@ _SYSTEM = (
     '重点词必须原样摘自该句，不得选医疗功效词。'
     '另外给 0-2 个花字：从该句原样摘 2-6 个字（不能带标点），'
     '花字风格只能从这些里选：' + '、'.join(f'{k}({v})' for k, v in flower_text.STYLE_MEANINGS.items()) + '。'
-    '花字最多每 4 句 1 个，医疗、功效、身体症状的句子不许配花字。'
+    '花字最多每 3 句 1 个，整条片子尽量给到 2-3 个（文案不足 4 句可只给 1 个）；医疗、功效、身体症状的句子不许配花字。'
     '只输出 JSON：{"highlights":{"1":["词"]},"stickers":[{"line":2,"icon":"check","at":"start","side":"right"}],'
     '"sfx":[{"line":2,"sound":"ding","gain":-6}],"flower":[{"line":2,"text":"中老年人","style":"burst_red","side":"right"}]}。不要 Markdown、不要解释。'
 )
@@ -95,9 +96,11 @@ _FLOWER_BANNED = ('治疗', '缓解', '止痛', '消炎', '活血', '活络', '�
                   '关节', '血压', '血糖', '疼痛', '病症', '疾病', '癌', '炎', '痛', '病', '酸', '胀', '麻', '肿')
 
 
-def _validate_flower(lines, raw):
+def _validate_flower(lines, raw, density='normal'):
     count = len(lines)
-    cap = max(1, count // 4)
+    per = FLOWER_DENSITY.get(density, 3)
+    cap = max(1, math.ceil(count / per))
+    if count >= 4 and density in ('normal', 'high', 'max'): cap = max(2, cap)
     seen, rows = set(), []
     for item in raw if isinstance(raw, list) else []:
         if not isinstance(item, dict):
@@ -126,13 +129,13 @@ def _validate_flower(lines, raw):
     return rows
 
 
-def validate(lines, data):
+def validate(lines, data, flower_density='normal'):
     if not isinstance(data, dict):
         return {'highlights': [[] for _ in lines], 'stickers': [], 'sfx': [], 'flower': []}
     highlights = highlight_ai.validate(lines, data.get('highlights'))
     stickers = _validate_stickers(lines, data.get('stickers'))
     sfx = _validate_sfx(lines, data.get('sfx'), {row['line'] for row in stickers})
-    flower = _validate_flower(lines, data.get('flower'))
+    flower = _validate_flower(lines, data.get('flower'), flower_density)
     return {'highlights': highlights, 'stickers': stickers, 'sfx': sfx, 'flower': flower}
 
 
@@ -147,7 +150,7 @@ def _parse(text):
         return None
 
 
-def plan(lines, name, base_url, api_key, model, timeout=60, want_highlights=True, want_stickers=True, want_sfx=True, want_flower=True, flower_style='auto'):
+def plan(lines, name, base_url, api_key, model, timeout=60, want_highlights=True, want_stickers=True, want_sfx=True, want_flower=True, flower_style='auto', flower_density='high'):
     lines = [str(line or '') for line in (lines or [])]
     if not lines or not api_key:
         return validate(lines, {})
@@ -159,7 +162,11 @@ def plan(lines, name, base_url, api_key, model, timeout=60, want_highlights=True
     if want_flower: asks.append('花字')
     if not asks:
         return validate(lines, {})
-    user = f'产品名：{name or "未提供"}\n文案：\n{numbered}\n\n本次只需要：{"、".join(asks)}。请按 JSON 返回。'
+    per = FLOWER_DENSITY.get(flower_density, 3)
+    user = f'产品名：{name or "未提供"}\n文案：\n{numbered}\n\n本次只需要：{"、".join(asks)}。'
+    if want_flower:
+        user += f'花字最多每 {per} 句 1 个（全片最多 {max(1, math.ceil(len(lines) / per))} 个）。'
+    user += '请按 JSON 返回。'
     payload = {
         'model': str(model or 'deepseek-chat'),
         'messages': [{'role': 'system', 'content': _SYSTEM}, {'role': 'user', 'content': user}],
@@ -176,7 +183,7 @@ def plan(lines, name, base_url, api_key, model, timeout=60, want_highlights=True
         text = aicopy.extract_text(data)
     except Exception:
         return validate(lines, {})
-    plan = validate(lines, _parse(text))
+    plan = validate(lines, _parse(text), flower_density)
     if flower_style in flower_text.STYLES:
         for row in plan['flower']:
             row['style'] = flower_style

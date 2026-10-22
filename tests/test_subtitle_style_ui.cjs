@@ -16,7 +16,7 @@ function make(style) {
     '#subStyle': {value: style}, '#shotReuse': {value: '1'}, '#dedup': {value: 'off'}, '#beauty': {checked: false},
     '#beautyStrength': {value: '.25'}, '#visualFilter': {value: 'original'}, '#visualFilterStrength': {value: '.35'},
     '#sentenceGapMode': {value: 'auto'}, '#sentenceGap': {value: ''},
-    '#hlOn': {checked: true}, '#stickerOn': {checked: true}, '#sfxOn': {checked: true}, '#flowerOn': {checked: true}, '#flowerStyle': {value: 'burst_red'},
+    '#hlOn': {checked: true}, '#stickerOn': {checked: true}, '#sfxOn': {checked: true}, '#flowerOn': {checked: true}, '#flowerStyle': {value: 'burst_red'}, '#flowerDensity': {value: 'max'},
   };
   const ctx = vm.createContext({document: {querySelector: (s) => nodes[s] || null}, window: {}, console, setTimeout: (fn) => { fn(); return 0; }, clearTimeout, AbortController, fetch: () => { throw Error('unexpected fetch'); }});
   vm.runInContext(source, ctx);
@@ -90,4 +90,14 @@ test('flower style picker lists auto plus every style and is sent through', () =
     assert.match(html, new RegExp(`value="${value}"`));
   }
   assert.equal(vm.runInContext('collectSettings().flower_style', f.ctx), 'burst_red');
+});
+
+
+test('flower density picker offers four levels and is sent through', () => {
+  const f = make('classic');
+  vm.runInContext('renderScript()', f.ctx);
+  const html = f.nodes['#secScript'].innerHTML;
+  assert.match(html, /id="flowerDensity"/);
+  for (const value of ['low', 'normal', 'high', 'max']) assert.match(html, new RegExp(`value="${value}"`));
+  assert.equal(vm.runInContext('collectSettings().flower_density', f.ctx), 'max');
 });

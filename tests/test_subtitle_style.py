@@ -88,3 +88,13 @@ def test_flower_style_accepts_auto_or_menu_only():
         assert ProductionSettings.from_dict({'flower_style': style}).snapshot()['flower_style'] == style
     with pytest.raises(ValueError):
         ProductionSettings.from_dict({'flower_style': 'nope'})
+
+
+def test_flower_density_defaults_high_and_validates_menu():
+    from workbench.settings import ProductionSettings
+    import pytest
+    assert ProductionSettings.from_dict({}).snapshot()['flower_density'] == 'high'
+    for value in ('low', 'normal', 'high', 'max'):
+        assert ProductionSettings.from_dict({'flower_density': value}).snapshot()['flower_density'] == value
+    with pytest.raises(ValueError):
+        ProductionSettings.from_dict({'flower_density': 'always'})

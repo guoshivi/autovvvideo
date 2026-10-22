@@ -908,7 +908,7 @@ class WorkbenchService:
                 pass
         base,key,model=highlight_ai.credentials(self.cfg)
         try:
-            plan=packaging.plan(x['lines'],p.get('name') or '',base,key,model,want_highlights=want_hl,want_stickers=want_st,want_sfx=want_sfx,want_flower=want_fl,flower_style=s.get('flower_style') or 'auto')
+            plan=packaging.plan(x['lines'],p.get('name') or '',base,key,model,want_highlights=want_hl,want_stickers=want_st,want_sfx=want_sfx,want_flower=want_fl,flower_style=s.get('flower_style') or 'auto',flower_density=s.get('flower_density') or 'high')
         except Exception:
             plan={'highlights':[[] for _ in x['lines']],'stickers':[],'sfx':[],'flower':[]}
         if any(plan.get('highlights') or []) or plan.get('stickers') or plan.get('sfx') or plan.get('flower'):
