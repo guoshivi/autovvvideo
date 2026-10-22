@@ -67,3 +67,23 @@ def test_density_controls_the_cap():
     assert len(packaging.validate(lines, data, 'normal')['flower']) == 3
     assert len(packaging.validate(lines, data, 'high')['flower']) == 4
     assert len(packaging.validate(lines, data, 'max')['flower']) == 7
+
+
+def test_seed_diversifies_same_ai_answer(monkeypatch):
+    from workbench import aicopy
+    body = '{"stickers":[{"line":1,"icon":"check","side":"right"},{"line":4,"icon":"money","side":"right"}],"flower":[{"line":1,"text":"一二三","style":"burst_red","side":"right"},{"line":4,"text":"四五六","style":"badge","side":"left"}]}'
+    monkeypatch.setattr(aicopy, '_post', lambda *a, **k: {'choices': [{'message': {'content': body}, 'finish_reason': 'stop'}]})
+    lines = ['一二三四五'] * 6
+    a = packaging.plan(lines, 'x', 'https://synthetic.invalid', 'TEST', 'stub', seed='job-a|0|0')
+    b = packaging.plan(lines, 'x', 'https://synthetic.invalid', 'TEST', 'stub', seed='job-b|0|0')
+    assert [(r['icon'], r['side']) for r in a['stickers']] != [(r['icon'], r['side']) for r in b['stickers']] or [r['style'] for r in a['flower']] != [r['style'] for r in b['flower']]
+    same = packaging.plan(lines, 'x', 'https://synthetic.invalid', 'TEST', 'stub', seed='job-a|0|0')
+    assert a == same
+
+
+def test_locked_style_is_not_diversified(monkeypatch):
+    from workbench import aicopy
+    body = '{"flower":[{"line":1,"text":"一二三","style":"badge","side":"right"}]}'
+    monkeypatch.setattr(aicopy, '_post', lambda *a, **k: {'choices': [{'message': {'content': body}, 'finish_reason': 'stop'}]})
+    plan = packaging.plan(['一二三四五'], 'x', 'https://synthetic.invalid', 'TEST', 'stub', flower_style='burst_red', seed='s1')
+    assert plan['flower'][0]['style'] == 'burst_red'

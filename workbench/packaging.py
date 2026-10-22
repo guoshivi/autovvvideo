@@ -6,6 +6,7 @@ re-render stays identical.  Unusable answers fall back to "no sticker / no sfx".
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import re
@@ -22,6 +23,47 @@ ICON_MEANINGS = {
     'eyes': '注意/看这里', 'bulb': '提示/妙招', 'party': '庆祝/节日', 'phone': '咨询/联系',
 }
 ICONS = tuple(ICON_MEANINGS)
+
+_ICON_FAMILIES = {
+    'check': ('check', 'star', 'clap'), 'star': ('star', 'check', 'clap'),
+    'clap': ('clap', 'star', 'heart'), 'muscle': ('muscle', 'clap'),
+    'question': ('question', 'eyes'), 'warning': ('warning', 'eyes'),
+    'eyes': ('eyes', 'question'), 'money': ('money', 'cart', 'gift'),
+    'cart': ('cart', 'money'), 'gift': ('gift', 'heart', 'cart'),
+    'fire': ('fire', 'party'), 'party': ('party', 'fire'),
+    'sparkle': ('sparkle', 'bulb'), 'bulb': ('bulb', 'sparkle'),
+    'box': ('box', 'home', 'truck'), 'home': ('home', 'box'),
+    'truck': ('truck', 'box'), 'leaf': ('leaf', 'sun'), 'sun': ('sun', 'leaf'),
+    'heart': ('heart', 'clap'), 'thumb': ('thumb', 'clap'),
+}
+_FLOWER_FAMILIES = {
+    'burst_red': ('burst_red', 'burst_orange'), 'burst_orange': ('burst_orange', 'burst_red'),
+    'glow_title': ('glow_title', 'neon'), 'neon': ('neon', 'glow_title'),
+    'bottom_glow': ('bottom_glow', 'brush', 'shadow3d'), 'brush': ('brush', 'bottom_glow', 'shadow3d'),
+    'shadow3d': ('shadow3d', 'brush', 'bottom_glow'),
+    'badge': ('badge', 'tape', 'bubble'), 'tape': ('tape', 'badge', 'bubble'), 'bubble': ('bubble', 'tape', 'badge'),
+}
+
+
+def _pick(options, seed, salt):
+    if len(options) <= 1:
+        return options[0]
+    h = hashlib.sha256(f'{seed}|{salt}'.encode('utf8')).digest()
+    return options[h[0] % len(options)]
+
+
+def _diversify(plan, seed, flower_locked=False):
+    """Give every job a different but still menu-valid combination."""
+    for n, row in enumerate(plan.get('stickers') or []):
+        row['icon'] = _pick(_ICON_FAMILIES.get(row['icon'], (row['icon'],)), seed, f'st{n}')
+        if hashlib.sha256(f'{seed}|side{n}'.encode()).digest()[1] & 1:
+            row['side'] = 'left' if row.get('side') == 'right' else 'right'
+    for n, row in enumerate(plan.get('flower') or []):
+        if not flower_locked:
+            row['style'] = _pick(_FLOWER_FAMILIES.get(row['style'], (row['style'],)), seed, f'fl{n}')
+        if hashlib.sha256(f'{seed}|fside{n}'.encode()).digest()[1] & 1:
+            row['side'] = 'left' if row.get('side') == 'right' else 'right'
+    return plan
 SOUNDS = ('ding', 'pop', 'whoosh', 'click', 'coin', 'success')
 FLOWER_DENSITY = {'low': 4, 'normal': 3, 'high': 2, 'max': 1}
 
@@ -150,7 +192,7 @@ def _parse(text):
         return None
 
 
-def plan(lines, name, base_url, api_key, model, timeout=60, want_highlights=True, want_stickers=True, want_sfx=True, want_flower=True, flower_style='auto', flower_density='high'):
+def plan(lines, name, base_url, api_key, model, timeout=60, want_highlights=True, want_stickers=True, want_sfx=True, want_flower=True, flower_style='auto', flower_density='high', seed=''):
     lines = [str(line or '') for line in (lines or [])]
     if not lines or not api_key:
         return validate(lines, {})
@@ -170,7 +212,7 @@ def plan(lines, name, base_url, api_key, model, timeout=60, want_highlights=True
     payload = {
         'model': str(model or 'deepseek-chat'),
         'messages': [{'role': 'system', 'content': _SYSTEM}, {'role': 'user', 'content': user}],
-        'temperature': 0.3,
+        'temperature': 0.8,
         'max_tokens': 1600,
         'stream': False,
     }
@@ -187,6 +229,8 @@ def plan(lines, name, base_url, api_key, model, timeout=60, want_highlights=True
     if flower_style in flower_text.STYLES:
         for row in plan['flower']:
             row['style'] = flower_style
+    if seed:
+        plan = _diversify(plan, seed, flower_locked=flower_style in flower_text.STYLES)
     if not want_highlights: plan['highlights'] = [[] for _ in lines]
     if not want_stickers: plan['stickers'] = []
     if not want_flower: plan['flower'] = []
