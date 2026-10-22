@@ -12,16 +12,24 @@ import re
 
 from . import aicopy, highlight_ai
 
-ICONS = ('check', 'cross', 'question', 'warning', 'cry', 'money', 'fire', 'sparkle', 'arrow', 'box')
+ICON_MEANINGS = {
+    'check': '对/正确', 'cross': '错/不要', 'question': '疑问', 'warning': '注意',
+    'cry': '糟糕', 'money': '价格/划算', 'fire': '热门', 'sparkle': '亮点',
+    'arrow': '指引', 'box': '产品/开箱',
+    'heart': '喜欢/心动', 'star': '好评/推荐', 'clock': '时间/限时', 'gift': '送礼/心意',
+    'cart': '下单/购买', 'truck': '发货/物流', 'home': '家庭/居家', 'leaf': '天然/草本',
+    'sun': '日常/好天气', 'shield': '防护/保护', 'muscle': '结实/有力', 'clap': '叫好/认可',
+    'eyes': '注意/看这里', 'bulb': '提示/妙招', 'party': '庆祝/节日', 'phone': '咨询/联系',
+}
+ICONS = tuple(ICON_MEANINGS)
 SOUNDS = ('ding', 'pop', 'whoosh', 'click', 'coin', 'success')
 
 _SYSTEM = (
     '你是短视频包装编辑。给你按行编号的口播文案，请一次给出三样东西：'
     '1) 每句 1-2 个值得在字幕里变色的重点词；2) 最多每 3 句 1 个贴图；3) 与贴图同帧的音效。'
-    '贴图只能从这些类型里选：check(对/正确)、cross(错/不要)、question(疑问)、warning(注意)、cry(糟糕)、'
-    'money(价格/划算)、fire(热门)、sparkle(亮点)、arrow(指引)、box(产品/开箱)。'
+    '贴图只能从这些类型里选：' + '、'.join(f'{k}({v})' for k, v in ICON_MEANINGS.items()) + '。'
     '音效只能从这些类型里选：ding、pop、whoosh、click、coin、success。'
-    '贴图不要每句都加，只在语义真的匹配时加；医疗、功效、身体症状的句子不许配 money/fire/sparkle 正向贴图。'
+    '贴图不要每句都加，只在语义真的匹配时加；医疗、功效、身体症状的句子不许配庆祝/正向类贴图（money/fire/sparkle/star/heart/party/clap/muscle）。'
     '重点词必须原样摘自该句，不得选医疗功效词。'
     '只输出 JSON：{"highlights":{"1":["词"]},"stickers":[{"line":2,"icon":"check","at":"start","side":"right"}],'
     '"sfx":[{"line":2,"sound":"ding","gain":-6}]}。不要 Markdown、不要解释。'

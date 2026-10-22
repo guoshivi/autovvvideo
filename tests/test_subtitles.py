@@ -38,16 +38,16 @@ def test_minimal_style_never_adds_override_tags():
     assert '\\c' not in out and out == '怎么分辨真假呢'
 
 
-def test_build_ass_uses_top_alignment_and_stacks_wrapped_lines():
+def test_build_ass_keeps_one_line_and_shrinks_long_text():
     ass = subtitles.build_ass('一' * 26, 'classic', size=54, bottom=380)
     assert 'PlayResX: 1080' in ass and 'PlayResY: 1920' in ass
     assert ',8,60,60,0,1' in ass  # alignment 8 = top centre
     dialogues = [line for line in ass.splitlines() if line.startswith('Dialogue:')]
-    assert len(dialogues) == 3  # 26 chars wrap at 12
-    margins = [int(line.split(',')[7]) for line in dialogues]
-    pitch = round(54 * 2.606 + 25.35)
-    assert margins[1] - margins[0] == pitch
-    assert margins[2] - margins[1] == pitch
+    assert len(dialogues) == 1  # one row only, never a stacked second line
+    assert '{\\fs36}' in dialogues[0]
+    assert '\\N' not in ass
+    short = subtitles.build_ass('短句', 'classic', size=54, bottom=380)
+    assert '\\fs' not in short
 
 
 def test_build_ass_rejects_unknown_and_legacy_styles():

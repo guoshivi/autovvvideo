@@ -171,10 +171,19 @@ def render_line(line: str, style: str, marks=(), auto: bool = True) -> str:
     return ''.join(parts)
 
 
+
+
+def _fit_size(text: str, width: int, base: int, margin: int = 72) -> int:
+    """Largest font size that keeps one line inside the safe width."""
+    units = sum(1.0 if ord(ch) > 127 else 0.55 for ch in text)
+    if units <= 0:
+        return base
+    return max(22, min(base, int((width - 2 * margin) / units)))
+
 def build_ass(text: str, style: str, size: int = 54, bottom: int = 380,
               width: int = 1080, height: int = 1920,
               font: str = 'Microsoft YaHei', hold: str = '9:59:59.99',
-              marks=(), auto: bool = True) -> str:
+              marks=(), auto: bool = True, single_line: bool = True) -> str:
     """Build a one-sentence ASS script.
 
     ``bottom`` keeps the legacy meaning: distance from the bottom of the frame
@@ -188,7 +197,7 @@ def build_ass(text: str, style: str, size: int = 54, bottom: int = 380,
     clean, inline = parse_marks(text)
     marks = tuple(inline) + tuple(marks or ())
     protect = [(m.start(), m.end()) for m in _NUMBER.finditer(clean)] + [(clean.find(w), clean.find(w) + len(w)) for w in marks if clean.find(w) >= 0]
-    lines = _wrap_lines(clean, 12, protect)
+    lines = [clean] if single_line else _wrap_lines(clean, 12, protect)
     pitch = round(size * 2.606 + 25.35)
     margin_v = height - bottom - round(size * 0.22)
     preset = ASS_PRESETS[style]
@@ -209,7 +218,13 @@ def build_ass(text: str, style: str, size: int = 54, bottom: int = 380,
     events = []
     for index, line in enumerate(lines):
         body = render_line(line, style, marks, auto=auto)
+        eff = _fit_size(line, width, size) if single_line else size
+        if eff < size:
+            body = f'{{\\fs{eff}}}' + body
+            mv = margin_v + index * pitch
+        else:
+            mv = margin_v + index * pitch
         events.append(
-            f'Dialogue: 0,0:00:00.00,{hold},Default,,0,0,{margin_v + index * pitch},,{body}'
+            f'Dialogue: 0,0:00:00.00,{hold},Default,,0,0,{mv},,{body}'
         )
     return head + '\n'.join(events) + '\n'

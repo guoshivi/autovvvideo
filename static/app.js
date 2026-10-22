@@ -351,7 +351,13 @@ function onCopyInput(){syncDraft();state.rewriteGeneration++;const x=rewriteStat
 function fmtMinutes(min){if(min<60)return min+' 分钟';const h=Math.floor(min/60),m=min%60;return m?`${h} 小时 ${m} 分钟`:`${h} 小时`}
 function renderBatchBox(){const ex=$('#batchExtra'),info=$('#batchInfo');if(!ex||!info)return;
   if(state.batchMode==='single'){ex.innerHTML=`数量 <input id="batchCount" type="number" min="1" max="500" value="${state.batchCount||1}" oninput="onBatchCount()"> <span class="muted">同一条脚本生成几个版</span>`;info.textContent='';onBatchCount()}
-  else{ex.innerHTML='';info.textContent=`已识别 ${parseBatchScripts(($('#copy')||{}).value).length} 条脚本`}}
+  else{const scripts=parseBatchScripts(($('#copy')||{}).value);
+    const counts=scripts.map((s,i)=>Math.max(1,Math.min(500,parseInt((state.batchCounts||[])[i],10)||1)));
+    state.batchCounts=counts;
+    ex.innerHTML=scripts.map((s,i)=>`<div class="row"><span class="muted">第 ${i+1} 条</span><span class="muted" style="max-width:46%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(s.slice(0,40))}${s.length>40?'…':''}</span><label>生成 <input class="scriptCount" data-i="${i}" type="number" min="1" max="500" value="${counts[i]}" oninput="onScriptCount(${i},this.value)" onchange="this.value=(state.batchCounts||[])[${i}]||1"> 条</label></div>`).join('');
+    info.textContent=`已识别 ${scripts.length} 条脚本，共 ${counts.reduce((a,b)=>a+b,0)} 条视频`}}
+function onScriptCount(i,value){const n=Math.max(1,Math.min(500,parseInt(value,10)||1));state.batchCounts=state.batchCounts||[];state.batchCounts[i]=n;
+  const info=$('#batchInfo');if(info){const total=state.batchCounts.reduce((a,b)=>a+(parseInt(b,10)||0),0);info.textContent=`已识别 ${state.batchCounts.length} 条脚本，共 ${total} 条视频`}}
 function onBatchCount(){const el=$('#batchCount'),info=$('#batchInfo');if(!el||!info)return;
   let v=Math.max(1,Math.min(500,parseInt(el.value,10)||1));state.batchCount=v;
   info.textContent=`${v} 版 ≈ 共约 ${fmtMinutes(v*2)}渲染（每版约 2 分钟）`}
@@ -366,9 +372,11 @@ async function makeJobs(){if(!state.product)return;const bj=$('#btnGo'),info=$('
   const url=`/api/products/${state.product.id}/jobs`;
   try{
     if(state.batchMode==='multi'){const scripts=parseBatchScripts(($('#copy')||{}).value);if(!scripts.length)return toast('没识别到脚本：多条脚本之间请用单独一行 --- 分隔','warn');
-      const ok=await confirmDialog(`将按 ${scripts.length} 条脚本分别创建任务，继续？`);if(!ok)return;
+      const counts=scripts.map((s,i)=>Math.max(1,Math.min(500,parseInt((state.batchCounts||[])[i],10)||1)));
+      const total=counts.reduce((a,b)=>a+b,0);
+      const ok=await confirmDialog(`将按 ${scripts.length} 条脚本创建 ${total} 条视频（每条 ${counts.join(' / ')} 条），继续？`);if(!ok)return;
       if(bj)bj.disabled=true;
-      for(let i=0;i<scripts.length;i++){if(info)info.textContent=`创建中 ${i+1}/${scripts.length} · ${wait}`;try{await api(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({count:1,text:scripts[i],settings:settings}),timeoutMs:600000})}catch(e){toast(`第 ${i+1} 条创建失败：${e.message}（前 ${i} 条已入队）`,'warn');break}}}
+      for(let i=0;i<scripts.length;i++){if(info)info.textContent=`创建中 ${i+1}/${scripts.length}（${counts[i]} 条）· ${wait}`;try{await api(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({count:counts[i],text:scripts[i],settings:settings}),timeoutMs:600000})}catch(e){toast(`第 ${i+1} 条创建失败：${e.message}（前 ${i} 条已入队）`,'warn');break}}}
     else{const count=Math.max(1,Math.min(500,Number(($('#batchCount')||{}).value)||1));state.batchCount=count;if(bj)bj.disabled=true;if(info)info.textContent=wait;
       await api(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({count:count,settings:settings}),timeoutMs:600000})}
     persistSettings();
