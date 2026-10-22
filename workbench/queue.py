@@ -46,8 +46,14 @@ class JobQueue:
             except Exception as e:raise CommitError('queue replace succeeded but readback failed',after_replace=True) from e
             if observed!=value:raise CommitError('queue replace succeeded but readback mismatched',after_replace=True)
             self.jobs=value
-        except CommitError:
+        except CommitError as e:
             self._restore_input_files(input_before)
+            if getattr(e,'after_replace',False):
+                # The published file is the only truth now.  Never leave the
+                # in-memory queue one revision behind disk: the UI would show a
+                # finished/exported job as running until the next restart.
+                try:self.jobs=self._load()
+                except Exception:pass
             raise
         except BaseException:
             if published:
@@ -55,9 +61,11 @@ class JobQueue:
                     if old_raw is None:self.path.unlink(missing_ok=True)
                     else:
                         rb=self.path.with_name(self.path.name+'.reconcile-'+uuid.uuid4().hex);rb.write_bytes(old_raw);replace_with_retry(rb,self.path)
-                    self.jobs=self._load()
-                    self._restore_input_files(input_before)
                 except Exception:pass
+                # Refresh from disk even when the rollback restore failed.
+                try:self.jobs=self._load()
+                except Exception:pass
+                self._restore_input_files(input_before)
                 raise CommitError('queue replace occurred but final condition failed',after_replace=True)
             try:t.unlink()
             except OSError:pass
