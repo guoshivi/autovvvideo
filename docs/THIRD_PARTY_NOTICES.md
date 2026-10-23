@@ -9,7 +9,7 @@
 | 素材 | 来源 | 许可 |
 |---|---|---|
 | `workbench/assets/stickers/*.png` | Microsoft Fluent Emoji（github.com/microsoft/fluentui-emoji） | MIT，见同目录 LICENSE |
-| `workbench/assets/sfx/*.wav` | 本项目用 FFmpeg 合成（正弦波/噪声），未使用第三方样本 | 随本项目分发 |
+| `workbench/assets/sfx/*.wav` | 基础 6 个由本项目合成；switch/rollover/error/notify/sparkle/powerup/slide/cash/win 取自 Kenney Audio；cart/purchase/coupon/checkout/reward/achievement/levelup/warn/swipe/hover/toggle/complete 取自 `romainsimon/uisfx` soft 包；均重采样 24k 单声道 | Kenney CC0-1.0；uisfx 音频 CC0（代码 MIT）；合成音随本项目分发。详见 `workbench/assets/sfx/LICENSE.md` |
 | `workbench/assets/music/*.mp3` | 本项目用 `_generate.py` 以纯振荡器合成，未使用第三方采样 | 随本项目分发 |
 
 ## 工具类

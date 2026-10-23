@@ -72,14 +72,23 @@ def _diversify(plan, seed, flower_locked=False):
         if hashlib.sha256(f'{seed}|fside{n}'.encode()).digest()[1] & 1:
             row['side'] = 'left' if row.get('side') == 'right' else 'right'
     return plan
-SOUNDS = ('ding', 'pop', 'whoosh', 'click', 'coin', 'success')
+SOUND_MEANINGS = {
+    'ding': '提示/强调', 'pop': '弹出/出现', 'whoosh': '转场/快速', 'click': '点击/确认',
+    'coin': '价格/省钱', 'success': '成功/完成', 'switch': '切换/对比', 'rollover': '轻提示/悬停',
+    'error': '错误/否定', 'notify': '提醒/通知', 'sparkle': '亮点/闪光', 'powerup': '升级/增强',
+    'slide': '滑入/转场', 'cash': '收钱/成交', 'win': '胜利/达成',
+    'cart': '加购/下单', 'purchase': '成交/付款', 'coupon': '优惠券/省钱', 'checkout': '结算',
+    'reward': '奖励', 'achievement': '成就', 'levelup': '升级', 'warn': '警告',
+    'swipe': '滑动', 'hover': '悬停', 'toggle': '开关', 'complete': '完成',
+}
+SOUNDS = tuple(SOUND_MEANINGS)
 FLOWER_DENSITY = {'low': 4, 'normal': 3, 'high': 2, 'max': 1}
 
 _SYSTEM = (
     '你是短视频包装编辑。给你按行编号的口播文案，请一次给出三样东西：'
     '1) 每句 1-2 个值得在字幕里变色的重点词；2) 最多每 3 句 1 个贴图；3) 与贴图同帧的音效。'
     '贴图只能从这些类型里选：' + '、'.join(f'{k}({v})' for k, v in ICON_MEANINGS.items()) + '。'
-    '音效只能从这些类型里选：ding、pop、whoosh、click、coin、success。'
+    '音效只能从这些类型里选：' + '、'.join(f'{k}({v})' for k, v in SOUND_MEANINGS.items()) + '。'
     '贴图不要每句都加，只在语义真的匹配时加；医疗、功效、身体症状的句子不许配庆祝/正向类贴图（money/fire/sparkle/star/heart/party/clap/muscle）。'
     '重点词必须原样摘自该句，不得选医疗功效词。'
     '另外给 0-2 个花字：从该句原样摘 2-6 个字（不能带标点），'

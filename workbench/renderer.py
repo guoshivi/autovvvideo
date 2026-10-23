@@ -377,12 +377,14 @@ def _apply_stickers(config,draft,stickers,timeline,bottom,d,cancel,width=1080,he
     total=round(timeline[-1]['end']*30)
     args=[config.ffmpeg,'-nostdin','-y','-v','error','-i',str(draft)]
     for icon,_,_,_ in windows:args+=['-loop','1','-i',str(assets/f'{icon}.png')]
-    chains=[f'[{n}:v]scale={size}:{size}:force_original_aspect_ratio=decrease[ic{n}]' for n in range(1,len(windows)+1)]
+    chains=[f'[{n}:v]format=rgba,fade=t=in:st={a:.3f}:d=0.16:alpha=1,fade=t=out:st={max(a,b-0.14):.3f}:d=0.12:alpha=1,scale={size}:{size}:force_original_aspect_ratio=decrease[ic{n}]' for n,(icon,side,a,b) in enumerate(windows,start=1)]
     prev='[0:v]'
     for n,(icon,side,a,b) in enumerate(windows,start=1):
-        x=width-size-60 if side=='right' else 60
+        target=width-size-60 if side=='right' else 60
+        dx=30 if side=='right' else -30
+        x=f"{target}+if(lt(t,{a:.3f}+0.18),(1-(t-{a:.3f})/0.18)*{dx},0)"
         y=max(40,height-int(bottom)-size-30)
-        chains.append(f"{prev}[ic{n}]overlay=x={x}:y={y}:enable='gte(t,{a:.3f})*lt(t,{b:.3f})'[v{n}]")
+        chains.append(f"{prev}[ic{n}]overlay=x='{x}':y={y}:enable='gte(t,{a:.3f})*lt(t,{b:.3f})'[v{n}]")
         prev=f'[v{n}]'
     out=d/'draft-stickers.mp4'
     args+=['-filter_complex',';'.join(chains),'-map',prev,'-an','-c:v','libx264','-preset','veryfast','-crf','18','-r','30','-frames:v',str(total),'-pix_fmt','yuv420p',str(out)]
