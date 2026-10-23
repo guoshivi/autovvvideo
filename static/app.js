@@ -243,6 +243,47 @@ function updatePron(i,k,v){if(!state.pronunciations[i])return;state.pronunciatio
 function removePron(i){if(!Array.isArray(state.pronunciations))return;state.pronunciations.splice(i,1);renderPronunciationBox();persistSettings()}
 
 
+
+
+
+const PACK_PRESETS=[
+  {id:'clean',name:'清爽口播',desc:'白字黄重点 · 轻包装',style:'linear-gradient(135deg,#eef2ff,#e0f2fe)',sub:'classic',size:54,bottom:380,flStyle:'auto',flDensity:'normal',sticker:false,sfx:false,flower:true},
+  {id:'energy',name:'高能带货',desc:'荧光大字 · 高频花字',style:'linear-gradient(135deg,#fff1f2,#ffedd5)',sub:'neon',size:66,bottom:380,flStyle:'burst_red',flDensity:'max',sticker:true,sfx:true,flower:true},
+  {id:'premium',name:'高级质感',desc:'纯白极简 · 金色画框',style:'linear-gradient(135deg,#f8fafc,#f1f5f9)',sub:'minimal',size:42,bottom:380,flStyle:'frame_gold',flDensity:'low',sticker:false,sfx:false,flower:true},
+  {id:'festival',name:'节日促销',desc:'暖橙字幕 · 绶带横幅',style:'linear-gradient(135deg,#fff7ed,#fef3c7)',sub:'orange',size:66,bottom:380,flStyle:'ribbon_badge',flDensity:'high',sticker:true,sfx:true,flower:true},
+];
+function renderPresetGallery(){
+  const host=$('#secOther');if(!host)return;
+  let box=$('#presetGallery');if(!box){box=document.createElement('div');box.id='presetGallery';box.className='preset-gallery';host.appendChild(box)}
+  box.innerHTML=`<div class="gallery-head">包装模板 <small class="muted">点一下套用整组设置</small></div><div class="preset-grid">${PACK_PRESETS.map(p=>`<button type="button" class="preset-card" style="background:${p.style}" onclick="applyPreset('${p.id}')"><b>${p.name}</b><span>${p.desc}</span></button>`).join('')}</div>`;
+}
+function applyPreset(id){
+  const p=PACK_PRESETS.find(x=>x.id===id);if(!p)return;
+  const set=(sel,val)=>{const el=$(sel);if(!el)return;if(el.type==='checkbox')el.checked=!!val;else el.value=String(val)};
+  set('#subStyle',p.sub);set('#subSize',p.size);set('#subPos',p.bottom);
+  set('#flowerStyle',p.flStyle);set('#flowerDensity',p.flDensity);
+  set('#stickerOn',p.sticker);set('#sfxOn',p.sfx);set('#flowerOn',p.flower);
+  persistSettings();renderSubtitleGallery();renderFlowerGallery();toast('已套用：'+p.name);
+}
+
+function renderVoiceGallery(){
+  const host=$('#secVoice');if(!host)return;
+  const sel=$('#speaker');if(!sel||!sel.options)return;
+  let box=$('#voiceGallery');if(!box){box=document.createElement('div');box.id='voiceGallery';box.className='voice-gallery';host.appendChild(box)}
+  const opts=[...sel.options];
+  box.innerHTML=`<div class="gallery-head">音色 <small class="muted">点一张直接换</small></div><div class="voice-cards">${opts.map(o=>{const g=o.closest('optgroup');const tag=g?g.label:'';return `<button type="button" class="voice-card ${sel.value===o.value?'active':''}" onclick="pickVoice('${o.value}')"><b>${esc(o.textContent)}</b><span>${esc(tag)}</span></button>`}).join('')}</div>`;
+}
+function pickVoice(v){const sel=$('#speaker');if(!sel)return;sel.value=v;sel.dispatchEvent(new Event('change'));document.querySelectorAll('#voiceGallery .voice-card').forEach(b=>b.classList.toggle('active',b.getAttribute('onclick').includes("'"+v+"'")));}
+
+function renderSubtitleGallery(){
+  const host=$('#secSubtitle');if(!host)return;
+  let box=$('#subGallery');if(!box){box=document.createElement('div');box.id='subGallery';box.className='sub-gallery';host.insertBefore(box,host.querySelector('.pron-box'))}
+  const sel=$('#subStyle');if(!sel||!sel.options)return;
+  const opts=[...sel.options];
+  box.innerHTML=`<div class="gallery-head">字幕样式 <small class="muted">点一张直接换</small></div><div class="sub-style-grid">${opts.map(o=>`<button type="button" class="sub-style-card ${sel.value===o.value?'active':''}" onclick="pickSubStyle('${o.value}')"><span class="sub-style-preview style-${o.value}">爆款</span><b>${esc(o.textContent)}</b></button>`).join('')}</div>`;
+}
+function pickSubStyle(v){const sel=$('#subStyle');if(!sel)return;sel.value=v;sel.dispatchEvent(new Event('change'));document.querySelectorAll('#subGallery .sub-style-card').forEach(b=>b.classList.toggle('active',b.getAttribute('onclick').includes("'"+v+"'")));}
+
 function renderFlowerGallery(){
   const host=$('#secFlower');if(!host)return;
   let box=$('#flowerGallery');if(!box){box=document.createElement('div');box.id='flowerGallery';box.className='flower-gallery';host.appendChild(box)}
@@ -295,9 +336,10 @@ function renderMusicLibrary(){
   if(!state.music.length){box.innerHTML='<h4>本地曲库</h4><p class="muted small">曲库为空，可把 mp3 放进 workbench/assets/music 并登记 music.json。</p>';return}
   const moods=['全部',...new Set(state.music.map(t=>t.mood))];
   const rows=state.music.filter(t=>state.musicMood==='全部'||t.mood===state.musicMood);
+  const colors={'兴奋':'linear-gradient(135deg,#fee2e2,#fecaca)','愉悦':'linear-gradient(135deg,#fef3c7,#fde68a)','平静':'linear-gradient(135deg,#e0f2fe,#bae6fd)','悲伤':'linear-gradient(135deg,#ede9fe,#ddd6fe)','动感':'linear-gradient(135deg,#dcfce7,#bbf7d0)'};
   box.innerHTML=`<h4>本地曲库 <small class="muted">${state.music.length} 首 · 可商用</small></h4>
   <div class="music-moods">${moods.map(m=>`<button type="button" class="chip ${state.musicMood===m?'on':''}" onclick="setMusicMood('${esc(m)}')">${esc(m)}</button>`).join('')}</div>
-  <div class="music-rows">${rows.map(t=>`<div class="music-row"><div class="music-meta"><b>${esc(t.title)}</b><span>${esc(t.mood)} · ${t.bpm} BPM · ${Math.round(t.duration)} 秒</span></div><button type="button" class="secondary small" onclick="previewMusic('${t.id}')">试听</button><button type="button" class="primary small" onclick="useMusic('${t.id}')">用作 BGM</button></div>`).join('')}</div>
+  <div class="music-grid">${rows.map(t=>`<div class="music-card" style="background:${colors[t.mood]||'#f8fafc'}"><div class="music-cover">♪</div><b>${esc(t.title)}</b><span>${esc(t.mood)} · ${t.bpm} BPM · ${Math.round(t.duration)} 秒</span><div class="music-actions"><button type="button" class="secondary small" onclick="previewMusic('${t.id}')">试听</button><button type="button" class="primary small" onclick="useMusic('${t.id}')">用作 BGM</button></div></div>`).join('')}</div>
   <audio id="musicAudio" controls preload="none" style="width:100%;margin-top:8px;display:none"></audio>`;
 }
 function setMusicMood(m){state.musicMood=m;renderMusicLibrary()}
@@ -383,8 +425,8 @@ function renderScript(){const el=$('#secScript');if(!el)return;
   const adv=$('#secAdvanced');
   if(adv)adv.innerHTML=(cutAdv>0&&cutBatch>cutAdv)?html.slice(cutAdv,cutBatch):'';
   const batchEl=$('#secBatch');
-  if(batchEl)batchEl.innerHTML=cutBatch>0?html.slice(cutBatch):'';
-  renderSubtitleEditor();distributeSettings();renderPronunciationBox();renderMusicLibrary();renderBrandBox();renderFlowerGallery();polishSettings();groupSettings();renderBatchBox();renderCopyList();renderEstimate();syncSentenceGapUI();renderRewritePreview();aiBusySet(state.aiBusy,state.aiBusyMessage)}
+  if(batchEl){batchEl.innerHTML=cutBatch>0?html.slice(cutBatch):'';if(typeof batchEl.querySelectorAll==='function')batchEl.querySelectorAll('details').forEach(x=>x.open=true)}
+  renderSubtitleEditor();distributeSettings();renderPronunciationBox();renderMusicLibrary();renderBrandBox();renderFlowerGallery();polishSettings();groupSettings();renderSubtitleGallery();renderVoiceGallery();renderPresetGallery();renderBatchBox();renderCopyList();renderEstimate();syncSentenceGapUI();renderRewritePreview();aiBusySet(state.aiBusy,state.aiBusyMessage)}
 function syncSentenceGapUI(){const voice=$('#voice'),mode=$('#sentenceGapMode'),input=$('#sentenceGap');const muted=!!voice&&!voice.checked;const auto=!mode||mode.value==='auto';if(mode)mode.disabled=muted;if(input){input.disabled=muted||auto;if(auto)input.value=''}}
 function onVoiceToggle(){syncSentenceGapUI();timingChanged();persistSettings()}
 function onSentenceGapModeChange(){const mode=$('#sentenceGapMode'),input=$('#sentenceGap');if(mode&&mode.value==='manual'&&input&&!String(input.value||'').trim())input.value='0.10';if(mode&&mode.value==='auto'&&input)input.value='';syncSentenceGapUI();timingChanged();persistSettings()}
@@ -643,12 +685,15 @@ function humanMsg(m){m=String(m||'').trim();if(!m)return '';
 function humanError(j){const e=(j.error||{});return humanMsg(e.message||e.check||e.stage||'')}
 const QUEUE_PER_PAGE=10;
 const QUEUE_FILTERS=[['all','全部'],['active','进行中'],['failed','失败'],['done','完成']];
-function queueFilterJobs(){const f=state.queueFilter||'all';const j=state.jobs;
-  if(f==='active')return j.filter(x=>['queued','running','paused'].includes(x.status));
-  if(f==='failed')return j.filter(x=>x.status==='failed');
-  if(f==='done')return j.filter(x=>x.status==='done');
+function queueFilterJobs(){const f=state.queueFilter||'all';let j=state.jobs;
+  if(f==='active')j=j.filter(x=>['queued','running','paused'].includes(x.status));
+  else if(f==='failed')j=j.filter(x=>x.status==='failed');
+  else if(f==='done')j=j.filter(x=>x.status==='done');
+  const q=String(state.queueQuery||'').trim().toLowerCase();
+  if(q)j=j.filter(x=>[x.id,x.script_summary,x.status,x.stage].some(v=>String(v||'').toLowerCase().includes(q)));
   return j}
 function queueSetFilter(f){state.queueFilter=f;state.queuePage=1;renderQueue()}
+function queueSetQuery(q){state.queueQuery=String(q||'').slice(0,80);state.queuePage=1;renderQueue()}
 function queueGo(d){const pages=Math.max(1,Math.ceil(queueFilterJobs().length/QUEUE_PER_PAGE));state.queuePage=Math.min(pages,Math.max(1,(state.queuePage||1)+d));renderQueue()}
 /* paused jobs are held by the server, not merely hidden: 继续 hands them back.
    暂停 is a request: 索引在文件边界、出片在步骤边界停下，状态变「已暂停」后再点「继续」。 */
@@ -666,7 +711,7 @@ function renderQueue(){const el=$('#secQueue');if(!el)return;
   const page=Math.min(pages,Math.max(1,state.queuePage||1));state.queuePage=page;
   const slice=jobs.slice((page-1)*QUEUE_PER_PAGE,page*QUEUE_PER_PAGE);
   const chips=QUEUE_FILTERS.map(([k,label])=>`<button class="qfbtn${f===k?' active':''}" onclick="queueSetFilter('${k}')">${label} <b>${cnt[k]}</b></button>`).join('');
-  const pager=`<div class="qfilter">${chips}</div><div class="pager"><span class="muted small">共 ${total} 条</span>${pages>1?`<button class="secondary small" onclick="queueGo(-1)" ${page<=1?'disabled':''}>‹ 上一页</button><span class="small pageno">第 ${page}/${pages} 页</span><button class="secondary small" onclick="queueGo(1)" ${page>=pages?'disabled':''}>下一页 ›</button>`:''}</div>`;
+  const pager=`<div class="qfilter">${chips}<input class="qsearch" placeholder="搜文案 / 任务号 / 状态" value="${esc(state.queueQuery||'')}" onchange="queueSetQuery(this.value)" onkeydown="if(event.key==='Enter'){this.blur()}"></div><div class="pager"><span class="muted small">共 ${total} 条</span>${pages>1?`<button class="secondary small" onclick="queueGo(-1)" ${page<=1?'disabled':''}>‹ 上一页</button><span class="small pageno">第 ${page}/${pages} 页</span><button class="secondary small" onclick="queueGo(1)" ${page>=pages?'disabled':''}>下一页 ›</button>`:''}</div>`;
   const queued=all.filter(j=>j.status==='queued').length,terminal=all.filter(j=>['done','failed','cancelled','interrupted'].includes(j.status)).length,w=state.worker||{};const disk=w.disk||{};
   const status=!w.alive&&state.worker?`<div class="errline">出片线程已停止：需要重启服务（或联系技术支持），已停放的任务可先取消</div>`:disk.ok===false?`<div class="skipline">磁盘空间不足（剩 ${(Number(disk.free_bytes||0)/1073741824).toFixed(1)} GB）：已暂停接单，清理空间后会自动继续</div>`:disk.free_bytes!=null?`<div class="muted small">磁盘剩余 ${(Number(disk.free_bytes)/1073741824).toFixed(1)} GB</div>`:'';
   const tools=`<div class="row queue-tools">${queued?`<button class="secondary small" onclick="cancelAllQueued()">取消全部排队中 (${queued})</button>`:''}<label class="muted small" title="导出文件核验并持久化完成后，保留导出文件并删除任务目录中的本地成片临时文件；失败会保留文件，报告、封面和少量音频仍保留"><input type="checkbox" ${state.prefs.cleanup_after_success?'checked':''} onchange="toggleCleanup(this)"> 出片成功核验后保留导出、清理本地成片临时文件（失败保留）</label><button class="secondary small" onclick="cleanupRecords()" ${terminal?'':'disabled'}>清理已结束记录</button></div>`;
