@@ -1,0 +1,70 @@
+id,section,subpanel,control,type,options,limits,ours,action,evidence
+F001,全局,顶栏,商品切换/新建商品,button,当前商品/切换/新建,,partial,restyle,nav-workbench.png
+F002,全局,顶栏,历史任务,button,抽屉/近期任务/全部任务,,partial,build,nav-workbench.png
+F003,全局,顶栏,设置,button,设置面板,,missing,build,smartclip-其他.png
+F004,全局,侧栏,一级导航,menu,灵感/资产/成片创作/原料创作,,partial,restyle,nav-workbench.png
+F005,全局,布局,左配置+中预览+右参数,layout,三栏,,missing,build,nav-workbench.png
+F006,全局,布局,右侧参数 Tab,tabs,脚本字幕/配音/音乐/花字/图片/其他,,missing,build,smartclip-脚本字幕.png
+F007,全局,布局,底部固定主按钮,button,立即生成,,partial,build,nav-workbench.png
+F008,全局,预览,9:16 预览/播放,player,生成后预览,,partial,build,nav-workbench.png
+F009,灵感,AI灵感广场,推荐/最新/热度,tabs,推荐/最新/热度,,missing,skip,灵感.png
+F010,灵感,AI灵感广场,时间筛选,filter,近3天,,missing,skip,灵感.png
+F011,灵感,AI灵感广场,节日/行业/视频类型,filter,假日节点/行业类型/视频类型,,missing,skip,灵感.png
+F012,灵感,AI灵感广场,热门素材卡片,card,播放/收藏/热度,,missing,skip,灵感.png
+F013,灵感,AI灵感广场,我的收藏,tab,收藏列表,,missing,skip,灵感.png
+F014,资产,成片库,成片列表,table,素材/状态/时间,,missing,skip,成片库.png
+F015,资产,原料库,视频/音频/文件夹,table,预审状态/类型/用途/来源/上传人/时长/大小,,missing,skip,原料库.png
+F016,资产,演员库,官方/我的演员,gallery,形象列表,,missing,skip,演员库.png
+F017,智能成片,商品,抖音商品ID/链接,input,商品ID或链接,自动生成商品属性,missing,build,smartclip-脚本字幕.png
+F018,智能成片,商品,选择商品,picker,商品库,,missing,build,smartclip-脚本字幕.png
+F019,智能成片,商品,商品属性,form,标题/主图/属性,,partial,build,smartclip-脚本字幕.png
+F020,智能成片,素材,添加视频,upload,本地/资产库,总时长 10s–10min,have,keep,smartclip-脚本字幕.png
+F021,智能成片,素材,添加商品图,upload,图片,,missing,build,smartclip-脚本字幕.png
+F022,智能成片,素材,智能匹配原料,auto,按商品/文案匹配,,have,keep,smartclip-脚本字幕.png
+F023,智能成片,素材,素材总时长限制,rule,10s–10min,,n/a,skip,smartclip-脚本字幕.png
+F024,智能成片,脚本,脚本1 + 添加脚本,cards,多脚本,每条 1000 字,partial,build,smartclip-脚本字幕.png
+F025,智能成片,脚本,每条脚本独立字数,counter,0/1000,1000,partial,build,smartclip-脚本字幕.png
+F026,智能成片,脚本,AI帮写,dialog,行业/场景/卖点/风格/优惠/人群/痛点/场景/字数,卖点60/优惠22/人群20/痛点22/场景22,have,restyle,dlg-AI帮写.png
+F027,智能成片,脚本,脚本库,dialog,选择脚本,,partial,build,dlg-脚本库.png
+F028,智能成片,脚本,音频脚本,dialog,原料库/本地上传；视频/音频/文件夹,,missing,build,dlg-音频脚本.png
+F029,智能成片,脚本,读音矫正,editor,逐句多音字,,missing,build,smartclip-脚本字幕.png
+F030,智能成片,脚本,每条脚本生成数量,number,每条各几条,即创未见,have,keep,smartclip-脚本字幕.png
+F031,智能成片,脚本字幕,显示字幕,toggle,开/关,,have,keep,smartclip-脚本字幕.png
+F032,智能成片,脚本字幕,版式 9:16,select,9:16,,have,keep,smartclip-脚本字幕.png
+F033,智能成片,脚本字幕,字幕样式,select,抖音美好体等,,partial,build,smartclip-脚本字幕.png
+F034,智能成片,脚本字幕,逐句字幕编辑,editor,脚本/读音/断句,,partial,build,smartclip-脚本字幕.png
+F035,智能成片,脚本字幕,重点词高亮,auto,系统/AI,,have,keep,smartclip-脚本字幕.png
+F036,智能成片,配音,系统推荐,auto,按文案推荐,,have,keep,smartclip-配音.png
+F037,智能成片,配音,音色库,gallery,约50个，男/女/风格,,partial,build,smartclip-配音.png
+F038,智能成片,配音,音色克隆,tab,限免,,have,keep,dlg-音色克隆.png
+F039,智能成片,配音,性别筛选,filter,不限/男性/女性,,missing,build,smartclip-配音.png
+F040,智能成片,配音,音量调节,slider,0–100,,missing,build,smartclip-配音.png
+F041,智能成片,配音,倍速调节,slider,0.5–2.0,,have,keep,smartclip-配音.png
+F042,智能成片,配音,试听,button,当前音色,,have,keep,smartclip-配音.png
+F043,智能成片,音乐,系统推荐,auto,按文案/情绪,,missing,build,smartclip-音乐.png
+F044,智能成片,音乐,曲库,library,数十首/页，多情绪,,missing,build,smartclip-音乐.png
+F045,智能成片,音乐,情绪筛选,filter,兴奋/愉悦/平静/悲伤/动感,,missing,build,smartclip-音乐.png
+F046,智能成片,音乐,我的音乐,tab,上传/收藏,,partial,build,dlg-我的音乐.png
+F047,智能成片,花字,模板库,gallery,约18个预设,,partial,build,smartclip-花字.png
+F048,智能成片,花字,默认文字/默认花字,toggle,默认,,have,keep,smartclip-花字.png
+F049,智能成片,花字,自定义文字,input,即创未见,,have,keep,smartclip-花字.png
+F050,智能成片,花字,入场动画,preset,模板自带,,missing,build,smartclip-花字.png
+F051,智能成片,图片,我的图片,upload,贴图/Logo/水印,最多20张,missing,build,dlg-我的图片.png
+F052,智能成片,图片,图片大小/位置,slider,可调,,missing,build,dlg-我的图片.png
+F053,智能成片,图片,已选图片,list,多张,,missing,build,dlg-我的图片.png
+F054,智能成片,其他,视频比例,select,9:16 / 16:9,,partial,build,smartclip-其他.png
+F055,智能成片,其他,智能包装,toggle,开/关,,partial,keep,smartclip-其他.png
+F056,智能成片,其他,包装风格,select,不限/国货,,missing,build,smartclip-其他.png
+F057,智能成片,其他,保存预设,button,保存当前配置,,missing,build,smartclip-其他.png
+F058,全局,任务,历史任务列表,table,近期/全部/搜索,,have,restyle,nav-workbench.png
+F059,全局,任务,任务搜索,search,按名称/商品,,missing,build,nav-workbench.png
+F060,全局,任务,失败原因,detail,错误信息,,have,keep,nav-workbench.png
+F061,全局,任务,任务详情/产物,detail,播放/下载,,have,keep,nav-workbench.png
+F062,全局,设置,账户/BP,panel,BP-1807808861465674/超管,,missing,skip,nav-workbench.png
+F063,全局,设置,积分/计费,panel,按生成时长,,n/a,skip,nav-workbench.png
+F064,全局,导出,云端历史,cloud,生成后可回看,,n/a,skip,nav-workbench.png
+F065,全局,导出,本地 NAS 导出,export,1080×1920,,have,keep,smartclip-其他.png
+F066,原料创作,数字人,数字人口播,page,形象+音色合成,当前账号点击不跳转,missing,skip,数字人.png
+F067,原料创作,AI视频原料,参考生视频,page,2种模型/9:16/8秒/参考图,,missing,skip,AI视频原料.png
+F068,原料创作,AI视频脚本,脚本生成/裂变/灵感库,page,行业/场景/卖点/字数,,partial,skip,AI视频脚本.png
+F069,成片创作,爆款裂变,可裂变素材,page,近30天消耗>750,,missing,skip,爆款裂变.png
