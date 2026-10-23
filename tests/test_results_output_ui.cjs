@@ -71,7 +71,8 @@ test('completed cards and result links remain intact',()=>{
   const f=fixture();
   vm.runInContext("state.jobs=[{id:'job-a',status:'done',artifact:{},lines_count:1,script_summary:'Example',variant:1,finished_at:1700000000}];renderResults()",f.ctx);
   const html=f.html();
-  assert.match(html,/class="daygroup"/);
+  assert.match(html,/class="resgrid"/);
+  assert.match(html,/class="rescard"/);
   assert.match(html,/\/api\/results\/job-a\?product_id=product-a/);
   assert.match(html,/>播放<\/a>/);
   assert.match(html,/>下载<\/a>/);

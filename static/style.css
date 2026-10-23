@@ -329,3 +329,45 @@ label.setting:has(#subStyle),label.setting:has(#flowerStyle){display:none!import
 .sticker-tile{border:1px solid #eef0f4;border-radius:7px;background:#fff;padding:4px 2px;display:flex;flex-direction:column;align-items:center;gap:2px;min-width:0}
 .sticker-tile img{width:42px;height:42px;object-fit:contain}
 .sticker-tile span{font-size:9px;color:#667085;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+
+/* ===== 2026-10-23 queue/result gallery ===== */
+.qcards{display:grid;gap:8px}
+.qcard{position:relative;display:flex;gap:10px;padding:9px;background:#fff;border:1px solid #e7eaf0;border-radius:12px;overflow:hidden}
+.qcard:before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;background:#cbd5e1}
+.qcard.q-running:before{background:#2563eb}.qcard.q-done:before{background:#16a34a}.qcard.q-failed:before{background:#dc2626}.qcard.q-paused:before{background:#d97706}
+.qthumb{width:62px;flex:none;aspect-ratio:9/16;border-radius:8px;overflow:hidden;position:relative;background:linear-gradient(160deg,#eef2f8,#e2e8f0)}
+.qthumb img{width:100%;height:100%;object-fit:cover;display:block}
+.qph{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;color:#667085}
+.qph b{font-size:15px;color:#344054}.qph span{font-size:9px;color:#98a2b3;text-align:center;padding:0 3px}
+.qdur{position:absolute;right:4px;bottom:4px;background:rgba(15,23,42,.74);color:#fff;font-size:9px;border-radius:4px;padding:1px 4px}
+.qbody{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}
+.qhead{display:flex;align-items:flex-start;justify-content:space-between;gap:6px}
+.qtitle{font-size:12px;font-weight:650;color:#172033;line-height:1.35;overflow:hidden;text-overflow:ellipsis;white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.qmeta{font-size:10px;color:#98a2b3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.qline{font-size:10.5px;color:#667085;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.qprog{display:flex;align-items:center;gap:6px;margin:2px 0}
+.qprog>div{flex:1;height:5px;background:#eef2f7;border-radius:4px;overflow:hidden}
+.qprog i{display:block;height:100%;background:linear-gradient(90deg,#60a5fa,#2563eb);border-radius:4px}
+.qprog span{font-size:9.5px;color:#2563eb;font-weight:700;width:30px;text-align:right}
+.qacts{display:flex;gap:4px;flex-wrap:wrap;margin-top:2px}
+.qacts .small,.qacts .miniact{padding:3px 7px;font-size:10px}
+.qempty{border:1px dashed #dfe4ec;border-radius:10px;padding:22px;text-align:center;color:#98a2b3;font-size:12px}
+.resgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(135px,1fr));gap:9px}
+.rescard{display:flex;flex-direction:column;gap:0;padding:0;border:1px solid #e7eaf0;border-radius:12px;overflow:hidden;background:#fff;transition:transform .16s ease,box-shadow .16s ease}
+.rescard:hover{transform:translateY(-2px);box-shadow:0 8px 22px rgba(15,23,42,.1)}
+.rescard .resthumb{width:100%;aspect-ratio:9/16;border-radius:0;flex:none}
+.rescard .resthumb img{width:100%;height:100%;object-fit:cover}
+.playover{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:34px;height:34px;border-radius:50%;background:rgba(15,23,42,.72);color:#fff;display:flex;align-items:center;justify-content:center;font-size:13px;opacity:0;transition:opacity .16s ease;text-decoration:none}
+.rescard:hover .playover{opacity:1}
+.rdur{position:absolute;right:5px;bottom:5px;background:rgba(15,23,42,.76);color:#fff;font-size:9.5px;border-radius:4px;padding:2px 5px}
+.rescard .resbody{padding:7px 8px 8px;gap:4px}
+.rescard .restitle{font-size:11px;font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rescard .vchip{font-size:9px;padding:1px 5px;margin-left:2px}
+.rescard .verrow{border:0;padding:0;gap:4px;display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center}
+.rescard .vmeta{font-size:9.5px;color:#98a2b3;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rescard .vacts{gap:3px;flex-wrap:nowrap;display:grid;grid-template-columns:1fr 1fr;width:100%;margin-top:2px}
+.rescard .miniact{font-size:9.5px;padding:3px 4px;border-radius:4px;text-align:center;white-space:nowrap}
+.dayhead{display:flex;align-items:center;gap:7px;margin:2px 0 7px}
+
+.rfchips{display:flex;gap:5px;flex-wrap:wrap}
+#secResults .qfilter{margin-bottom:8px}
