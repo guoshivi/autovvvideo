@@ -171,6 +171,56 @@ function brandLabels(){
 }
 
 
+
+function polishSettings(){
+  if(typeof document.querySelectorAll!=='function')return;
+  const panels=['#secVoice','#secSubtitle','#secSticker','#secFlower','#secMusic','#secOther'];
+  document.querySelectorAll(panels.map(p=>p+' label').join(',')).forEach(label=>{
+    if(label.dataset.polished||label.closest('.brand-box')||label.closest('.pron-box')||label.closest('.music-lib'))return;
+    const kids=[...label.childNodes];
+    const check=kids.find(n=>n.nodeType===1&&n.matches&&n.matches('input[type=checkbox]'));
+    const select=kids.find(n=>n.nodeType===1&&n.matches&&n.matches('select'));
+    const textNodes=kids.filter(n=>n.nodeType===3&&n.textContent.trim());
+    const main=textNodes[0];
+    if(check&&!select){
+      label.classList.add('switch-row');
+      const text=textNodes.map(n=>n.textContent).join(' ').trim();
+      label.innerHTML='';label.appendChild(check);const sp=document.createElement('span');sp.textContent=text;label.appendChild(sp);
+      label.dataset.polished='1';return;
+    }
+    if(!main&&!select){label.dataset.polished='1';return}
+    label.classList.add('setting');
+    const lbl=document.createElement('span');lbl.className='lbl';lbl.textContent=(main?main.textContent:'').trim();
+    const ctl=document.createElement('span');ctl.className='ctl';
+    kids.forEach(n=>{
+      if(n===main)return;
+      if(n.nodeType===3){if(n.textContent.trim())ctl.appendChild(document.createTextNode(n.textContent))}
+      else ctl.appendChild(n);
+    });
+    label.innerHTML='';label.append(lbl,ctl);label.dataset.polished='1';
+  });
+}
+function _groupPanel(host,groups){
+  if(!host||typeof document.getElementById!=='function'||typeof host.querySelectorAll!=='function')return;
+  const labels=[...host.querySelectorAll(':scope > label')];
+  if(!labels.length)return;
+  const used=new Set(),boxes=[];
+  groups.forEach(g=>{
+    const box=document.createElement('div');box.className='setting-group';
+    const h=document.createElement('h5');h.textContent=g.title;box.appendChild(h);
+    g.ids.forEach(id=>{const c=document.getElementById(id);const lab=c&&c.closest('label');if(lab&&host.contains(lab)&&!used.has(lab)){box.appendChild(lab);used.add(lab)}});
+    if(box.querySelector('label'))boxes.push(box);
+  });
+  const rest=labels.filter(l=>!used.has(l));
+  if(rest.length){const box=document.createElement('div');box.className='setting-group';const h=document.createElement('h5');h.textContent='更多';box.appendChild(h);rest.forEach(l=>box.appendChild(l));boxes.push(box)}
+  const anchor=host.querySelector('.pron-box,.brand-box,.music-lib');
+  boxes.forEach(b=>host.insertBefore(b,anchor));
+}
+function groupSettings(){
+  _groupPanel($('#secSubtitle'),[{title:'字幕显示',ids:['subs','subSize','subPos','subBorder','subStyle']},{title:'高亮',ids:['hlSource','hlOn']}]);
+  _groupPanel($('#secOther'),[{title:'输出',ids:['target','aspect']},{title:'画面',ids:['dedup','beauty','visualFilter','shotReuse']},{title:'封面与片头尾',ids:['coverMode','introOn','outroOn']}]);
+}
+
 function renderSubtitleEditor(){
   const el=$('#secSubtitleEditor');if(!el)return;
   if(!state.product){el.innerHTML='<h3><span class="num">3</span>逐句字幕</h3><p class="muted">选择商品后可用。</p>';return}
@@ -186,7 +236,7 @@ function renderPronunciationBox(){
   let box=$('#pronBox');
   if(!box){box=document.createElement('div');box.id='pronBox';box.className='pron-box';host.appendChild(box)}
   const rows=Array.isArray(state.pronunciations)?state.pronunciations:[];
-  box.innerHTML=`<h4>读音矫正 <small class="muted">只改配音，不改字幕</small></h4><div class="pron-rows">${rows.map((r,i)=>`<div class="pron-row"><input value="${esc(r.from||'')}" placeholder="原词" onchange="updatePron(${i},'from',this.value)"><span>→</span><input value="${esc(r.to||'')}" placeholder="读作" onchange="updatePron(${i},'to',this.value)"><button type="button" class="secondary small" onclick="removePron(${i})">删</button></div>`).join('')}</div><button type="button" class="secondary small" onclick="addPron()">＋ 添加读音</button>`;
+  box.innerHTML=`<h4>读音矫正 <small class="muted">只改配音，不改字幕</small></h4><div class="pron-rows">${rows.map((r,i)=>`<div class="pron-row"><input value="${esc(r.from||'')}" placeholder="原词" onchange="updatePron(${i},'from',this.value)"><span>→</span><input value="${esc(r.to||'')}" placeholder="读作" onchange="updatePron(${i},'to',this.value)"><button type="button" class="secondary small" onclick="removePron(${i})">删</button></div>`).join('')||'<p class="muted small">遇到多音字、数字读法时再加。</p>'}</div><button type="button" class="secondary small" onclick="addPron()">＋ 添加读音</button>`;
 }
 function addPron(){if(!Array.isArray(state.pronunciations))state.pronunciations=[];if(state.pronunciations.length>=50)return toast('最多 50 条读音矫正','warn');state.pronunciations.push({from:'',to:''});renderPronunciationBox()}
 function updatePron(i,k,v){if(!state.pronunciations[i])return;state.pronunciations[i][k]=String(v).trim();persistSettings()}
@@ -324,7 +374,7 @@ function renderScript(){const el=$('#secScript');if(!el)return;
   if(adv)adv.innerHTML=(cutAdv>0&&cutBatch>cutAdv)?html.slice(cutAdv,cutBatch):'';
   const batchEl=$('#secBatch');
   if(batchEl)batchEl.innerHTML=cutBatch>0?html.slice(cutBatch):'';
-  renderSubtitleEditor();distributeSettings();renderPronunciationBox();renderMusicLibrary();renderBrandBox();renderBatchBox();renderCopyList();renderEstimate();syncSentenceGapUI();renderRewritePreview();aiBusySet(state.aiBusy,state.aiBusyMessage)}
+  renderSubtitleEditor();distributeSettings();renderPronunciationBox();renderMusicLibrary();renderBrandBox();polishSettings();groupSettings();renderBatchBox();renderCopyList();renderEstimate();syncSentenceGapUI();renderRewritePreview();aiBusySet(state.aiBusy,state.aiBusyMessage)}
 function syncSentenceGapUI(){const voice=$('#voice'),mode=$('#sentenceGapMode'),input=$('#sentenceGap');const muted=!!voice&&!voice.checked;const auto=!mode||mode.value==='auto';if(mode)mode.disabled=muted;if(input){input.disabled=muted||auto;if(auto)input.value=''}}
 function onVoiceToggle(){syncSentenceGapUI();timingChanged();persistSettings()}
 function onSentenceGapModeChange(){const mode=$('#sentenceGapMode'),input=$('#sentenceGap');if(mode&&mode.value==='manual'&&input&&!String(input.value||'').trim())input.value='0.10';if(mode&&mode.value==='auto'&&input)input.value='';syncSentenceGapUI();timingChanged();persistSettings()}
