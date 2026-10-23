@@ -30,6 +30,7 @@ __pycache__/
 *.wav
 !workbench/assets/sfx/*.wav
 *.mp3
+!workbench/assets/music/*.mp3
 *.m4a
 *.aac
 *.flac

@@ -182,3 +182,13 @@ button.miniact{cursor:pointer}
 .col-right .ai-row{flex-wrap:wrap}
 .col-right .estline{margin-top:8px}
 .go-row{position:sticky;bottom:8px;z-index:6;background:var(--card,#fff);padding:10px 0 6px;border-top:1px solid var(--line)}
+
+.music-lib{margin-top:14px;border-top:1px solid var(--line);padding-top:10px}
+.music-lib h4{margin:0 0 8px;font-size:13px}
+.music-moods{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:6px}
+.music-moods .chip{cursor:pointer;border:1px solid var(--line);background:transparent}
+.music-moods .chip.on{background:var(--primary);color:#fff;border-color:var(--primary)}
+.music-row{display:flex;align-items:center;gap:5px;padding:6px 0;border-bottom:1px dashed var(--line)}
+.music-meta{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.music-meta b{font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.music-meta span{font-size:11px;color:var(--muted)}

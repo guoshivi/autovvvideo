@@ -6,6 +6,7 @@ from email.message import Message
 from contextlib import ExitStack
 from .media import range_response,sha256
 from .browser import BrowserError
+from . import music
 class WorkbenchHandler(BaseHTTPRequestHandler):
     server_version='Workbench/2.0'
     def log_message(self,*args):return
@@ -130,6 +131,8 @@ class WorkbenchHandler(BaseHTTPRequestHandler):
             while tb is not None and tb.tb_next is not None:tb=tb.tb_next
             if isinstance(e, KeyError):
                 message='试听不存在或已过期'
+            elif isinstance(e,ServiceError) and (str(e).startswith('显卡') or str(e).startswith('GPU preflight')):
+                message=str(e)
             elif tb is not None and tb.tb_frame.f_code in origins.get(type(e),set()) and str(e) in controlled:
                 message=str(e)
             else:
@@ -156,6 +159,23 @@ class WorkbenchHandler(BaseHTTPRequestHandler):
                     roots.append({'id':i,'name':tail,'path':str(r)})
                 return self._json(roots)
             if u.path=='/api/ai-settings':return self._json(svc.ai_settings())
+            if u.path=='/api/music':return self._json(music.list_tracks())
+            if u.path.startswith('/api/music/'):
+                p=music.resolve(u.path.rsplit('/',1)[-1])
+                raw=p.read_bytes();total=len(raw);rh=self.headers.get('Range');status=200;start=0;end=total-1;n=total
+                if rh:
+                    import re
+                    m=re.fullmatch(r'bytes=(\d*)-(\d*)',rh.strip())
+                    if not m: raise ValueError('invalid Range')
+                    a,b=m.groups();start=int(a) if a else max(0,total-int(b or 0));end=int(b) if a and b else total-1
+                    if start<0 or start>end or end>=total:
+                        self._response_started=True;self.send_response(416);self.send_header('Content-Range',f'bytes */{total}');self.end_headers();return
+                    status=206;n=end-start+1
+                ctype='audio/mpeg' if p.suffix.lower()=='.mp3' else 'audio/wav'
+                self._response_started=True;self.send_response(status);self.send_header('Content-Type',ctype);self.send_header('Cache-Control','public, max-age=3600');self.send_header('Accept-Ranges','bytes');self.send_header('Content-Length',str(n))
+                if status==206:self.send_header('Content-Range',f'bytes {start}-{end}/{total}')
+                self.end_headers();self.wfile.write(raw[start:end+1]);return
+
             if u.path=='/api/vox-voices':return self._json(svc.vox_voices())
             if u.path.startswith('/api/voice-preview/'):
                 pid=u.path.rsplit('/',1)[-1];p,meta=svc.preview_audio(pid,(q.get('sha256') or [None])[0])

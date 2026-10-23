@@ -14,7 +14,7 @@ from pathlib import Path
 
 
 VOICE_ENGINES = {"qwen", "vox"}
-QWEN_SPEAKERS = {"Serena", "Vivian", "Uncle_Fu"}
+QWEN_SPEAKERS = {"Serena", "Vivian", "Uncle_Fu", "Ryan", "Aiden", "Ono_Anna", "Sohee", "Eric", "Dylan"}
 VOX_PROMPT_PHRASE = "大家好，今天和你分享一个实用的小发现。"
 VOX_PRESETS = {
     "natural_female": {

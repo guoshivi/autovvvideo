@@ -1,0 +1,9 @@
+{
+  "tracks": [
+    {"file": "excited.mp3", "title": "开场脉冲", "mood": "兴奋", "bpm": 124, "duration": 60, "license": "本机合成，可商用"},
+    {"file": "happy.mp3", "title": "轻快日常", "mood": "愉悦", "bpm": 104, "duration": 60, "license": "本机合成，可商用"},
+    {"file": "calm.mp3", "title": "松弛氛围", "mood": "平静", "bpm": 72, "duration": 60, "license": "本机合成，可商用"},
+    {"file": "sad.mp3", "title": "慢叙情绪", "mood": "悲伤", "bpm": 64, "duration": 60, "license": "本机合成，可商用"},
+    {"file": "dynamic.mp3", "title": "节奏推进", "mood": "动感", "bpm": 128, "duration": 60, "license": "本机合成，可商用"}
+  ]
+}

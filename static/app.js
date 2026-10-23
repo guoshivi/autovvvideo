@@ -1,5 +1,5 @@
 /* 视频工作台 V2 前端（v9：AI 文案 / 语速 / 目标时长 / 常用稿 / 一键出片 / 封面片头尾 / 结果卡片 / 镜头去重） */
-const state={products:[],jobs:[],product:null,noAutoSelect:false,draft:'',draftProductId:null,draftByProduct:{},retrieval:[],roots:[],picker:null,batchMode:'single',batchCount:1,bgm:null,cover:null,intro:null,outro:null,indexReady:false,indexInfo:null,timing:null,aiOpen:false,aiBusy:false,aiHasKey:false,aiOut:null,aiRewriteOpen:true,aiRewrite:null,rewriteByProduct:{},rewriteGeneration:0,lastJobsSig:'',lastIndexSample:null,settingsTimer:null,settingsTimers:{},queuePage:1,resultsPage:1,prefs:{cleanup_after_success:true},worker:null,previewBusy:false,previewAudio:null,cleanUndo:null,voxPresets:null,voxClones:[],voxCloneDir:''};
+const state={products:[],jobs:[],product:null,noAutoSelect:false,draft:'',draftProductId:null,draftByProduct:{},retrieval:[],roots:[],picker:null,batchMode:'single',batchCount:1,bgm:null,music:[],musicMood:'全部',musicPreview:null,cover:null,intro:null,outro:null,indexReady:false,indexInfo:null,timing:null,aiOpen:false,aiBusy:false,aiHasKey:false,aiOut:null,aiRewriteOpen:true,aiRewrite:null,rewriteByProduct:{},rewriteGeneration:0,lastJobsSig:'',lastIndexSample:null,settingsTimer:null,settingsTimers:{},queuePage:1,resultsPage:1,prefs:{cleanup_after_success:true},worker:null,previewBusy:false,previewAudio:null,cleanUndo:null,voxPresets:null,voxClones:[],voxCloneDir:''};
 const $=s=>document.querySelector(s),esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 async function api(url,opt){opt=opt||{};const ctl=new AbortController();const tid=setTimeout(()=>ctl.abort(),opt.timeoutMs||30000);let r;
 try{r=await fetch(url,Object.assign({},opt,{signal:ctl.signal}))}catch(e){clearTimeout(tid);throw Error(e.name==='AbortError'?'请求超时，请再试一次':e.message)}
@@ -28,6 +28,7 @@ async function load(){try{setErr('');if(state.draftProductId==null||state.draftP
   try{state.prefs=await api('/api/prefs')}catch(e){state.prefs={cleanup_after_success:true}}
   if(state.product)state.product=state.products.find(p=>p.id===state.product.id)||null;
   if(!state.roots.length){try{state.roots=await api('/api/roots')}catch(e){}}
+  try{state.music=await api('/api/music')}catch(e){state.music=[]}
   try{const vv=await api('/api/vox-voices');state.voxPresets=vv.presets||null;state.voxClones=vv.clones||[];state.voxCloneDir=vv.dir||''}catch(e){}
   hydrateSettings();
   renderTop();renderScript();renderQueue();renderResults();
@@ -144,6 +145,33 @@ function distributeSettings(){
   }
   if(adv)[...adv.querySelectorAll('.advgrid > *')].forEach(put);
 }
+
+function renderMusicLibrary(){
+  const host=$('#secMusic');if(!host)return;
+  let box=$('#musicLib');
+  if(!box){box=document.createElement('div');box.id='musicLib';box.className='music-lib';host.appendChild(box)}
+  if(!state.music.length){box.innerHTML='<h4>本地曲库</h4><p class="muted small">曲库为空，可把 mp3 放进 workbench/assets/music 并登记 music.json。</p>';return}
+  const moods=['全部',...new Set(state.music.map(t=>t.mood))];
+  const rows=state.music.filter(t=>state.musicMood==='全部'||t.mood===state.musicMood);
+  box.innerHTML=`<h4>本地曲库 <small class="muted">${state.music.length} 首 · 可商用</small></h4>
+  <div class="music-moods">${moods.map(m=>`<button type="button" class="chip ${state.musicMood===m?'on':''}" onclick="setMusicMood('${esc(m)}')">${esc(m)}</button>`).join('')}</div>
+  <div class="music-rows">${rows.map(t=>`<div class="music-row"><div class="music-meta"><b>${esc(t.title)}</b><span>${esc(t.mood)} · ${t.bpm} BPM · ${Math.round(t.duration)} 秒</span></div><button type="button" class="secondary small" onclick="previewMusic('${t.id}')">试听</button><button type="button" class="primary small" onclick="useMusic('${t.id}')">用作 BGM</button></div>`).join('')}</div>
+  <audio id="musicAudio" controls preload="none" style="width:100%;margin-top:8px;display:none"></audio>`;
+}
+function setMusicMood(m){state.musicMood=m;renderMusicLibrary()}
+function previewMusic(id){
+  const t=state.music.find(x=>x.id===id);if(!t)return;
+  const a=$('#musicAudio');if(!a)return;
+  a.style.display='';a.src='/api/music/'+encodeURIComponent(id);a.play().catch(()=>{});
+}
+function useMusic(id){
+  const t=state.music.find(x=>x.id===id);if(!t)return;
+  state.bgm={name:t.title+'（'+t.mood+'）',path:t.path};state.musicPreview=null;
+  const b=$('#bgmBtn');if(b)b.textContent='BGM：'+state.bgm.name;
+  const cl=$('#bgmClear');if(cl)cl.style.display='';
+  persistSettings();toast('已选 BGM：'+t.title);
+}
+
 function renderPreview(job){
   const box=$('#wbPreview');if(!box)return;
   if(!job){box.innerHTML='<div class="wb-preview-phone"><b>9:16</b><span>成片预览</span><small>生成后在这里播放；历史结果仍在下方</small></div><div class="wb-preview-meta" id="wbPreviewMeta">1080 × 1920 · 30fps</div>';return}
@@ -165,7 +193,7 @@ function renderScript(){const el=$('#secScript');if(!el)return;
 <div id="aiPanel" class="ai-panel" ${state.aiOpen?'':'hidden'}><div class="advgrid"><label>产品名 <input id="aiName" placeholder="例如：厨房收纳架" value="${esc(state.product.name)}"></label><label class="wide">卖点 <textarea id="aiPoints" rows="2" placeholder="一行一个，例如：分格收纳、可拆洗、适合厨房台面"></textarea></label><label>人群 <input id="aiAudience" placeholder="例如：30-50 岁上班族"></label><label>风格 <input id="aiStyle" placeholder="例如：亲切、生活化"></label></div><div class="row"><button class="primary" id="btnAIGenerateStart" onclick="aiRun('generate')">开始生成</button><button class="secondary" onclick="aiTogglePanel()">收起</button></div><div class="ai-krow"><details class="adv" open><summary>AI 接口设置（填一次就记住）</summary><div class="advgrid"><label>接口地址 <input id="aiBaseUrl" placeholder="https://api.deepseek.com"></label><label>密钥 <span class="row"><input id="aiKey" type="password" placeholder="${state.aiHasKey?'已配置（留空不改动）':'未配置'}"><button class="secondary small" onclick="saveAiSettings()">保存</button><button class="secondary small" id="aiKeyClear" onclick="clearAiKey()" style="${state.aiHasKey?'':'display:none'}">清除密钥</button></span></label><span class="muted wide">密钥只保存在这台 Win 机上，不会显示回页面；留空则保持原密钥不变。使用 AI 时，文案和产品信息会发送给所填写的服务商。</span></div><details><summary>高级：模型名称（可选）</summary><label>模型 <input id="aiModel" placeholder="服务商提供的模型 ID；留空保持原值"></label></details></details></div></div>
 <div class="settings-row"><label><input id="voice" type="checkbox" ${s.voice?'checked':''} onchange="onVoiceToggle()"> 语音</label><label><input id="subs" type="checkbox" ${s.subtitles?'checked':''} onchange="onSettingChange()"> 字幕</label><label class="voice-engine-label">配音 <select id="voiceEngine" onchange="onEngineChange()"><option value="qwen" ${engine==='qwen'?'selected':''}>Qwen（原配音）</option><option value="vox" ${engine==='vox'?'selected':''}>Vox（新配音·试用）</option></select></label><label class="slider-label">语速 <input id="speed" type="range" min="0.85" max="1.5" step="0.05" value="${Number(s.speed)||1}" oninput="onSpeedInput()"> <b id="speedVal">${(Number(s.speed)||1).toFixed(2).replace(/0$/,'').replace(/\.$/,'.0')}×</b></label><label>句间停顿 <select id="sentenceGapMode" ${s.voice?'':'disabled'} onchange="onSentenceGapModeChange()"><option value="auto" ${s.sentence_gap_seconds==null?'selected':''}>自动（0.18–0.35 秒）</option><option value="manual" ${s.sentence_gap_seconds!=null?'selected':''}>手动</option></select> <input id="sentenceGap" type="number" min="0.10" max="1.00" step="0.01" value="${s.sentence_gap_seconds==null?'':Number(s.sentence_gap_seconds).toFixed(2)}" placeholder="0.10–1.00" ${s.voice?'':'disabled'} oninput="onSentenceGapInput()"> 秒</label><label>目标时长 <input id="target" type="number" min="0" max="3600" step="1" value="${Number(s.target_seconds)||''}" placeholder="不设" oninput="renderEstimate();persistSettings()"> 秒</label></div>
 <div class="settings-row voice-row">
-<label class="engine-control qwen-control" style="${engine==='qwen'?'':'display:none'}">Qwen 说话人 <select id="speaker" onchange="onSettingChange()"><option value="Serena" ${s.speaker==='Serena'?'selected':''}>Serena（自然女声）</option><option value="Vivian" ${s.speaker==='Vivian'?'selected':''}>Vivian（清晰女声）</option><option value="Uncle_Fu" ${s.speaker==='Uncle_Fu'?'selected':''}>Uncle Fu（成熟男声）</option></select></label>
+<label class="engine-control qwen-control" style="${engine==='qwen'?'':'display:none'}">Qwen 说话人 <select id="speaker" onchange="onSettingChange()"><optgroup label="女声"><option value="Serena" ${s.speaker==='Serena'?'selected':''}>女声 1 · 自然</option><option value="Vivian" ${s.speaker==='Vivian'?'selected':''}>女声 2 · 清晰</option><option value="Ono_Anna" ${s.speaker==='Ono_Anna'?'selected':''}>女声 3 · 日系</option><option value="Sohee" ${s.speaker==='Sohee'?'selected':''}>女声 4 · 韩系</option></optgroup><optgroup label="男声"><option value="Uncle_Fu" ${s.speaker==='Uncle_Fu'?'selected':''}>男声 1 · 成熟</option><option value="Ryan" ${s.speaker==='Ryan'?'selected':''}>男声 2 · 沉稳</option><option value="Aiden" ${s.speaker==='Aiden'?'selected':''}>男声 3 · 年轻</option></optgroup><optgroup label="方言"><option value="Eric" ${s.speaker==='Eric'?'selected':''}>男声 · 四川话</option><option value="Dylan" ${s.speaker==='Dylan'?'selected':''}>男声 · 北京话</option></optgroup></select></label>
 <label class="engine-control vox-control" style="${engine==='vox'?'':'display:none'}">Vox 声音 <select id="voxVoice" onchange="onSettingChange()">${voxVoiceOptions(s.vox_voice)}</select><button class="secondary small" onclick="refreshVoxVoices()" title="重新扫描克隆文件夹">刷新音色</button><span class="muted" title="${esc(state.voxCloneDir)}">丢音频到克隆文件夹即可添加：${esc(state.voxCloneDir||'读取中…')}</span></label><button class="secondary small" id="btnVoicePreview" onclick="previewVoice()" ${state.previewBusy?'disabled':''}>${state.previewBusy?'正在试听…':'试听当前配音'}</button><span id="voicePreviewStatus" class="muted"></span><audio id="voicePreviewAudio" controls preload="none" style="${state.previewAudio?'':'display:none'}" src="${state.previewAudio?esc(state.previewAudio):''}"></audio>
 </div>
 <div class="estline"><span id="estChip" class="chip">预计成片约 -- 秒</span><span id="warnChip" class="chip"></span></div>
@@ -204,7 +232,7 @@ function renderScript(){const el=$('#secScript');if(!el)return;
   if(adv)adv.innerHTML=(cutAdv>0&&cutBatch>cutAdv)?html.slice(cutAdv,cutBatch):'';
   const batchEl=$('#secBatch');
   if(batchEl)batchEl.innerHTML=cutBatch>0?html.slice(cutBatch):'';
-  distributeSettings();renderBatchBox();renderCopyList();renderEstimate();syncSentenceGapUI();renderRewritePreview();aiBusySet(state.aiBusy,state.aiBusyMessage)}
+  distributeSettings();renderMusicLibrary();renderBatchBox();renderCopyList();renderEstimate();syncSentenceGapUI();renderRewritePreview();aiBusySet(state.aiBusy,state.aiBusyMessage)}
 function syncSentenceGapUI(){const voice=$('#voice'),mode=$('#sentenceGapMode'),input=$('#sentenceGap');const muted=!!voice&&!voice.checked;const auto=!mode||mode.value==='auto';if(mode)mode.disabled=muted;if(input){input.disabled=muted||auto;if(auto)input.value=''}}
 function onVoiceToggle(){syncSentenceGapUI();timingChanged();persistSettings()}
 function onSentenceGapModeChange(){const mode=$('#sentenceGapMode'),input=$('#sentenceGap');if(mode&&mode.value==='manual'&&input&&!String(input.value||'').trim())input.value='0.10';if(mode&&mode.value==='auto'&&input)input.value='';syncSentenceGapUI();timingChanged();persistSettings()}
@@ -216,7 +244,8 @@ function voicePreviewText(){let text=String(($('#copy')||{}).value||'').trim();i
 function voicePreviewKey(s,text){return JSON.stringify([state.product?.id||null,s.voice_engine||'qwen',s.speaker,s.vox_voice,Number(s.speed)||1,text])}
 const VOX_PRESETS_FALLBACK=[['natural_female','自然分享女声'],['bright_female','清晰活力女声（不喊叫）'],['calm_male','沉稳成熟男声'],['story_female','温暖叙事女声']];
 function voxVoiceOptions(sel){const base=(state.voxPresets&&state.voxPresets.length)?state.voxPresets.map(p=>[p.id,p.label]):VOX_PRESETS_FALLBACK;const clones=(state.voxClones||[]).map(c=>[c.id,c.label]);let opts=base.concat(clones);if(sel&&!opts.some(o=>o[0]===sel))opts=[[sel,sel+'（文件未找到）']].concat(opts);return opts.map(o=>`<option value="${esc(o[0])}" ${sel===o[0]?'selected':''}>${esc(o[1])}</option>`).join('')}
-async function refreshVoxVoices(){try{const vv=await api('/api/vox-voices');state.voxPresets=vv.presets||state.voxPresets;state.voxClones=vv.clones||[];state.voxCloneDir=vv.dir||'';renderScript();toast('音色列表已刷新','ok')}catch(e){toast('刷新失败：'+e.message,'warn')}}
+async function refreshVoxVoices(){try{state.music=await api('/api/music')}catch(e){state.music=[]}
+  try{const vv=await api('/api/vox-voices');state.voxPresets=vv.presets||state.voxPresets;state.voxClones=vv.clones||[];state.voxCloneDir=vv.dir||'';renderScript();toast('音色列表已刷新','ok')}catch(e){toast('刷新失败：'+e.message,'warn')}}
 async function previewVoice(){
   if(state.previewBusy)return;
   const btn=$('#btnVoicePreview'),status=$('#voicePreviewStatus');

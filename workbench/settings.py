@@ -7,7 +7,7 @@ from .subtitles import SUBTITLE_STYLES
 from .flower_text import STYLES as FLOWER_STYLES
 
 _DEDUP={'off','light','double'}
-_SPEAKERS={'Serena','Vivian','Uncle_Fu'}
+_SPEAKERS={'Serena','Vivian','Uncle_Fu','Ryan','Aiden','Ono_Anna','Sohee','Eric','Dylan'}
 _VOICE_ENGINES={'qwen','vox'}
 _VOX_VOICES={'natural_female','bright_female','calm_male','story_female'}
 _COVER_MODES={'auto','frame','file'}
@@ -51,7 +51,7 @@ class ProductionSettings:
     def validate(self):
         for k in ('voice','subtitles','bgm','beauty'):
             if type(getattr(self,k)) is not bool:raise ValueError(f'{k} must be boolean')
-        if not isinstance(self.speaker,str) or self.speaker not in _SPEAKERS:raise ValueError('speaker must be Serena, Vivian or Uncle_Fu')
+        if not isinstance(self.speaker,str) or self.speaker not in _SPEAKERS:raise ValueError('speaker 不在支持列表')
         if not isinstance(self.voice_engine,str) or self.voice_engine not in _VOICE_ENGINES:raise ValueError('voice_engine must be qwen or vox')
         if not isinstance(self.vox_voice,str) or not (self.vox_voice in _VOX_VOICES or is_clone_voice_id(self.vox_voice)):raise ValueError('vox_voice must be a built-in preset or a clone folder name')
         if self.bgm and (not self.bgm_path or not Path(self.bgm_path).is_file()):raise ValueError('BGM 文件不存在')

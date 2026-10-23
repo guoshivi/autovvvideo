@@ -10,6 +10,7 @@
 |---|---|---|
 | `workbench/assets/stickers/*.png` | Microsoft Fluent Emoji（github.com/microsoft/fluentui-emoji） | MIT，见同目录 LICENSE |
 | `workbench/assets/sfx/*.wav` | 本项目用 FFmpeg 合成（正弦波/噪声），未使用第三方样本 | 随本项目分发 |
+| `workbench/assets/music/*.mp3` | 本项目用 `_generate.py` 以纯振荡器合成，未使用第三方采样 | 随本项目分发 |
 
 ## 工具类
 
