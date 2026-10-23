@@ -97,6 +97,11 @@ def _bind_voice_sources(job,jobdir):
         pcm.setflags(write=False);bindings.append((path,receipt,pcm))
     return tuple(bindings)
 
+def _display_line(settings,line,index):
+    ov=settings.get('subtitle_overrides') or []
+    if 0<=index<len(ov) and isinstance(ov[index],str) and ov[index].strip():return ov[index].strip()
+    return line
+
 def render_video(job,config,jobdir,cancel=None,progress=None,_voice_binding=None,_return_beauty=False):
     """job snapshot has immutable lines, selected candidates and source fingerprints."""
     d=Path(jobdir);s=job['settings'];lines=job['lines'];mapping=job['mapping'];voice=job.get('voices',[]);W=int(s.get('width') or 1080);H=int(s.get('height') or 1920)
@@ -128,14 +133,15 @@ def render_video(job,config,jobdir,cancel=None,progress=None,_voice_binding=None
             want=voice_slot_seconds(len(vpcm)/24000) if gap is None else sentence_slot_seconds(len(vpcm)/24000,gap,is_last=i==len(lines)-1)
         else:want=max(2.0,min(8,max(1.8,len(line)/5)))
         frames=math.ceil(want*30);required=frames/30;cap=None
+        disp=_display_line(s,line,i)
         if s['subtitles']:
-            cap=d/f'cap_{i:03d}.txt';cap.write_text(wrap_caption(line),encoding='utf8')
+            cap=d/f'cap_{i:03d}.txt';cap.write_text(wrap_caption(disp),encoding='utf8')
         ass=None
         if cap and is_ass_style(s.get('subtitle_style')):
             ass=f'cap_{i:03d}.ass'
-            marks=highlights[i] if i<len(highlights) else ()
+            marks=highlights[i] if i<len(highlights) and disp==line else ()
             highlight_on=bool(s.get('subtitle_highlight',True))
-            (d/ass).write_text(build_ass(line,s['subtitle_style'],size=s['subtitle_size'],bottom=s['subtitle_bottom'],width=W,height=H,marks=marks if highlight_on else (),auto=highlight_on and not manual_marks_only),encoding='utf8')
+            (d/ass).write_text(build_ass(disp,s['subtitle_style'],size=s['subtitle_size'],bottom=s['subtitle_bottom'],width=W,height=H,marks=marks if highlight_on else (),auto=highlight_on and not manual_marks_only),encoding='utf8')
         remaining=frames;local=[];turn=0;chosen=[];cuts=[];sentence_start=total_frames/30
         picker=selector.new_sentence(candidates)
         while remaining>0:
@@ -285,7 +291,7 @@ def _encode_mux(config,draft,master,phase,attempt,cancel):
     final=attempt/'final.mp4';_command([config.ffmpeg,'-nostdin','-n','-v','error','-i',str(draft),'-itsoffset',str(-phase/24000),'-i',str(audio),'-map','0:v:0','-map','1:a:0','-c','copy','-movflags','+faststart',str(final)],attempt,config.max_stage_seconds,cancel)
     return final
 
-def encode_with_phase_retry(config,draft,master,timeline,voice_wavs,jobdir,mode,cancel=None,eos_receipts=None,source_receipts=None,frozen_voice_pcm=None,expected_engine='qwen',sentence_gap_seconds=None,width=1080,height=1920):
+def encode_with_phase_retry(config,draft,master,timeline,voice_wavs,jobdir,mode,cancel=None,eos_receipts=None,source_receipts=None,frozen_voice_pcm=None,expected_engine='qwen',sentence_gap_seconds=None,width=1080,height=1920,voice_gain=1.0):
     failures=[]
     for phase in PHASE_PREFIXES:
         if cancel and cancel():raise Cancelled('codec/cancel')
@@ -295,7 +301,7 @@ def encode_with_phase_retry(config,draft,master,timeline,voice_wavs,jobdir,mode,
                 _assert_voice_sources(voice_wavs,source_receipts)
             verify_kwargs={}
             if sentence_gap_seconds is not None:verify_kwargs['sentence_gap_seconds']=sentence_gap_seconds
-            report=verify_media(final,config.ffmpeg,config.ffprobe,timeline,master,voice_wavs,mode,cancel,config.max_stage_seconds,eos_receipts,frozen_voice_pcm=frozen_voice_pcm,expected_engine=expected_engine,width=width,height=height,**verify_kwargs)
+            report=verify_media(final,config.ffmpeg,config.ffprobe,timeline,master,voice_wavs,mode,cancel,config.max_stage_seconds,eos_receipts,frozen_voice_pcm=frozen_voice_pcm,expected_engine=expected_engine,width=width,height=height,voice_gain=voice_gain,**verify_kwargs)
             report['codec_phase_samples']=phase;report['codec_attempts']=len(failures)+1
             return final,report
         except VerificationFailure as e:
@@ -385,24 +391,29 @@ def _apply_stickers(config,draft,stickers,timeline,bottom,d,cancel,width=1080,he
     return out
 
 def _apply_brand(config,draft,settings,d,cancel,width=1080):
-    logo=bool(settings.get('logo_enabled')) and str(settings.get('logo_path') or '')
+    items=[]
+    if settings.get('overlay_enabled') and settings.get('overlay_images'):
+        items=list(settings['overlay_images'])[:20]
+    elif settings.get('logo_enabled') and str(settings.get('logo_path') or ''):
+        items=[{'path':settings['logo_path'],'sha256':settings.get('logo_sha256'),'pos':settings.get('logo_pos','tr'),'scale':settings.get('logo_scale',.16),'opacity':settings.get('logo_opacity',.9)}]
     text=str(settings.get('watermark_text') or '').strip() if settings.get('watermark_enabled') else ''
-    if not logo and not text:return draft
+    if not items and not text:return draft
     total=round(_probe_duration(config.ffprobe,draft)*30)
     args=[config.ffmpeg,'-nostdin','-y','-v','error','-i',str(draft)]
-    chains=[];prev='0:v'
-    if logo:
-        p=Path(settings['logo_path']);reject_links(p)
-        if not p.is_file():raise ValueError('render/logo: source missing')
-        if settings.get('logo_sha256') and sha256(p)!=settings['logo_sha256']:raise ValueError('render/logo: source changed')
+    for item in items:
+        p=Path(item['path']);reject_links(p)
+        if not p.is_file():raise ValueError('render/overlay: source missing')
+        if item.get('sha256') and sha256(p)!=item['sha256']:raise ValueError('render/overlay: source changed')
         args+=['-loop','1','-i',str(p)]
-        size=max(32,int(width*float(settings.get('logo_scale',.16))))
-        alpha=max(0.0,min(1.0,float(settings.get('logo_opacity',.9))))
-        pos=settings.get('logo_pos','tr')
+    chains=[];prev='0:v'
+    for n,item in enumerate(items,start=1):
+        size=max(32,int(width*float(item.get('scale',.16))))
+        alpha=max(0.0,min(1.0,float(item.get('opacity',.9))))
+        pos=item.get('pos','tr')
         x='48' if pos in ('tl','bl') else 'W-w-48'
         y='48' if pos in ('tl','tr') else 'H-h-48'
-        chains.append(f'[1:v]format=rgba,scale={size}:-1,colorchannelmixer=aa={alpha:.3f}[lg]')
-        chains.append(f'[{prev}][lg]overlay={x}:{y}:format=auto[v1]');prev='v1'
+        chains.append(f'[{n}:v]format=rgba,scale={size}:-1,colorchannelmixer=aa={alpha:.3f}[im{n}]')
+        chains.append(f'[{prev}][im{n}]overlay={x}:{y}:format=auto[v{n}]');prev=f'v{n}'
     if text:
         body=d/'watermark.txt';body.write_text(text,encoding='utf8')
         font=str(getattr(config,'font_path','') or '').replace(chr(92),'/')
@@ -411,12 +422,13 @@ def _apply_brand(config,draft,settings,d,cancel,width=1080):
         pos=settings.get('watermark_pos','br')
         x='48' if pos in ('tl','bl') else 'w-tw-48'
         y='48' if pos in ('tl','tr') else 'h-th-48'
-        chains.append(f"[{prev}]drawtext=fontfile='{font}':textfile='watermark.txt':fontcolor=white@{alpha:.3f}:fontsize={size}:x={x}:y={y}:shadowcolor=black@0.45:shadowx=2:shadowy=2[v2]");prev='v2'
+        chains.append(f"[{prev}]drawtext=fontfile='{font}':textfile='watermark.txt':fontcolor=white@{alpha:.3f}:fontsize={size}:x={x}:y={y}:shadowcolor=black@0.45:shadowx=2:shadowy=2[vw]");prev='vw'
     out=d/'draft-brand.mp4'
     args+=['-filter_complex',';'.join(chains),'-map',f'[{prev}]','-an','-c:v','libx264','-preset','veryfast','-crf','18','-r','30','-frames:v',str(total),'-pix_fmt','yuv420p',str(out)]
     _command(args,d,config.max_stage_seconds,cancel)
     if abs(_probe_duration(config.ffprobe,out)-_probe_duration(config.ffprobe,draft))>1/30+.001:raise ValueError('render/brand duration mismatch')
     return out
+
 
 def _mix_sfx(master,sfx,timeline,stickers):
     if not sfx:return master
@@ -454,12 +466,14 @@ def render_job(job,config,jobdir,cancel=None,progress=None):
     if job.get('flower') and s.get('flower_enabled',True):draft=_apply_flower(config,draft,job['flower'],timeline,s['subtitle_bottom'],d,cancel,W,H)
     draft=_apply_brand(config,draft,s,d,cancel,W)
     sfx_on=bool(job.get('sfx')) and s.get('sfx_enabled',True)
-    master=_mix_sfx(voice_master,job['sfx'],timeline,job.get('stickers')) if sfx_on else voice_master
+    vgain=max(0.0,min(1.0,float(s.get('voice_volume',1.0))))
+    mix_voice=voice_master*vgain if s['voice'] else voice_master
+    master=_mix_sfx(mix_voice,job['sfx'],timeline,job.get('stickers')) if sfx_on else mix_voice
     engine=s.get('voice_engine','qwen')
     gap_kw={} if s.get('sentence_gap_seconds') is None else {'sentence_gap_seconds':s.get('sentence_gap_seconds')}
     eos_receipts=[v.get('eos') for v in receipts] if s['voice'] else None
     if s['voice']:
-        intermediate,intermediate_report=encode_with_phase_retry(config,draft,voice_master,timeline,wavs,d/'voice-intermediate','voice',cancel,eos_receipts,receipts,frozen_pcm,engine,**gap_kw,width=W,height=H)
+        intermediate,intermediate_report=encode_with_phase_retry(config,draft,voice_master,timeline,wavs,d/'voice-intermediate','voice',cancel,eos_receipts,receipts,frozen_pcm,engine,**gap_kw,width=W,height=H,voice_gain=1.0)
         _assert_voice_sources(wavs,receipts)
         (d/'voice-intermediate-report.json').write_text(json.dumps(intermediate_report,ensure_ascii=False),encoding='utf8')
     mix_fit=None
@@ -475,7 +489,7 @@ def render_job(job,config,jobdir,cancel=None,progress=None):
             # mixes keep the user's requested level, and the soft limiter
             # below catches rare coincidences - fitting the bed to one
             # worst-case sample made the BGM inaudible (user: "BGM 没声音").
-            gain=_fit_mix_gain(voice_master,music,MIX_PRE_CAP)
+            gain=_fit_mix_gain(mix_voice,music,MIX_PRE_CAP)
             if gain<0.01:raise ValueError('render/mix clips; lower BGM volume')
             master=master-music;music=music*gain;master=master+music
             mix_fit={'bgm_gain':round(gain,4),'bgm_attenuated_db':round(20*math.log10(gain),1)}
@@ -490,7 +504,7 @@ def render_job(job,config,jobdir,cancel=None,progress=None):
         else:mode='bgm' if sfx_on else 'silent'
     if mode=='silent':
         final=d/'final.mp4';shutil.copyfile(draft,final);report=verify_media(final,config.ffmpeg,config.ffprobe,timeline,None,None,'silent',cancel,config.max_stage_seconds,width=W,height=H)
-    else:final,report=encode_with_phase_retry(config,draft,master,timeline,wavs if s['voice'] else None,d/'final-codec',mode,cancel,eos_receipts,receipts if s['voice'] else None,frozen_pcm if s['voice'] else None,engine,**gap_kw,width=W,height=H)
+    else:final,report=encode_with_phase_retry(config,draft,master,timeline,wavs if s['voice'] else None,d/'final-codec',mode,cancel,eos_receipts,receipts if s['voice'] else None,frozen_pcm if s['voice'] else None,engine,**gap_kw,width=W,height=H,voice_gain=vgain)
     if s['voice']:
         _assert_voice_sources(wavs,receipts)
     report['timeline']=timeline;report['source_index_id']=job['index_id'];report['input_sha256']=job['input_sha256'];report['voice_wav_sha256']=[v['sha256'] for v in receipts];report['bgm_sha256']=job.get('bgm_sha256');report['eos_receipts']=eos_receipts;report['voice_engine']=engine;report['voice_completion']='natural_stop' if s['voice'] else 'not_applicable'

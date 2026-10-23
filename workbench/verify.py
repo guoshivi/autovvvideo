@@ -34,7 +34,7 @@ def decode(ffmpeg,path,out,with_audio,cancel=None,timeout=900):
         return y
     return None
 
-def verify_media(path,ffmpeg,ffprobe,timeline,expected=None,voice_wavs=None,mode='silent',cancel=None,timeout=900,eos_receipts=None,frozen_voice_pcm=None,expected_engine='qwen',sentence_gap_seconds=None,width=1080,height=1920):
+def verify_media(path,ffmpeg,ffprobe,timeline,expected=None,voice_wavs=None,mode='silent',cancel=None,timeout=900,eos_receipts=None,frozen_voice_pcm=None,expected_engine='qwen',sentence_gap_seconds=None,width=1080,height=1920,voice_gain=1.0):
     """Verify a final file against the immutable original-clock PCM contract.
 
     ``expected`` is the complete, read-only final PCM master.  For mixed audio,
@@ -97,6 +97,7 @@ def verify_media(path,ffmpeg,ffprobe,timeline,expected=None,voice_wavs=None,mode
         for i,(wav_path,t) in enumerate(zip(voice_wavs,timeline)):
             x=read_wav(wav_path) if frozen_voice_pcm is None else np.array(frozen_voice_pcm[i],dtype=np.float64,copy=True)
             if x.ndim!=1 or not len(x) or not np.isfinite(x).all():raise VerificationFailure('verify','voice PCM','empty/nonfinite','immutable finite original PCM',i)
+            if float(voice_gain)!=1.0:x=np.array(x*float(voice_gain),dtype=np.float64,copy=False)
             x.setflags(write=False);voice_samples.append(x)
             start=round(float(t['start'])*24000);end=round(float(t['end'])*24000)
             if start<0 or start+len(x)>end:raise VerificationFailure('verify','WAV bounds',{'sentence':i,'start':start,'samples':len(x)},end,i)

@@ -51,8 +51,11 @@ def test_brand_pass_renders_logo_and_watermark(tmp_path):
     filters = subprocess.run([FFMPEG, "-hide_banner", "-filters"], capture_output=True, text=True).stdout
     has_drawtext = " drawtext " in filters
     out = _apply_brand(cfg, src, {
-        "logo_enabled": True, "logo_path": str(logo), "logo_sha256": "",
-        "logo_pos": "tr", "logo_scale": 0.16, "logo_opacity": 0.9,
+        "overlay_enabled": True,
+        "overlay_images": [
+            {"path": str(logo), "sha256": "", "pos": "tr", "scale": 0.16, "opacity": 0.9},
+            {"path": str(logo), "sha256": "", "pos": "bl", "scale": 0.10, "opacity": 0.7},
+        ],
         "watermark_enabled": has_drawtext, "watermark_text": "TEST", "watermark_pos": "bl",
         "watermark_size": 28, "watermark_opacity": 0.6,
     }, d, None)
@@ -60,3 +63,15 @@ def test_brand_pass_renders_logo_and_watermark(tmp_path):
     probe = json.loads(subprocess.run([FFPROBE, "-v", "error", "-show_entries", "format=duration",
                                        "-of", "json", str(out)], capture_output=True, text=True, check=True).stdout)
     assert abs(float(probe["format"]["duration"]) - 1.2) < 0.08
+
+
+def test_overlay_images_accepts_up_to_twenty(tmp_path):
+    logo = tmp_path / "logo.png"
+    Image.new("RGBA", (32, 32), (0, 0, 255, 255)).save(logo)
+    row = {"path": str(logo), "sha256": "", "pos": "tr", "scale": 0.16, "opacity": 0.9}
+    s = ProductionSettings.from_dict({"overlay_enabled": True, "overlay_images": [row] * 20})
+    assert len(s.overlay_images) == 20
+    with pytest.raises(ValueError):
+        ProductionSettings.from_dict({"overlay_enabled": True, "overlay_images": [row] * 21})
+    with pytest.raises(ValueError):
+        ProductionSettings.from_dict({"overlay_images": [dict(row, pos="xx")]})

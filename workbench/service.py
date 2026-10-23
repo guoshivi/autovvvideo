@@ -19,6 +19,7 @@ from .fs_authority import lexical_under, AuthorityError, capture_lease
 from .process import run_owned,Cancelled
 from .queue import CommitError as QueueCommitError
 from .cleanup import cleanup_job_dir,remove_job_dir,iter_tree
+from .pronunciation import apply_rules
 from .voice_engines import (VoiceEngineError, VOX_PRESETS, require_vox_config, require_qwen_config,
                             list_clone_voices, resolve_clone_voice, validate_preview_payload, opaque_preview_id)
 
@@ -418,6 +419,12 @@ class WorkbenchService:
             digest=sha256(logo)
             if setting.get('logo_sha256') and digest!=setting['logo_sha256']:raise ServiceError('Logo 图片已变化，请重新上传')
             setting['logo_sha256']=digest
+        for row in setting.get('overlay_images') or []:
+            pth=Path(row.get('path') or '');reject_links(pth)
+            if not pth.is_file():raise ServiceError('叠加图片不可用，请重新上传')
+            digest=sha256(pth)
+            if row.get('sha256') and digest!=row['sha256']:raise ServiceError('叠加图片已变化，请重新上传')
+            row['sha256']=digest
         for key,label in (('intro','片头'),('outro','片尾')):
             if setting.get(key):setting[key]=self._bind_media(setting[key],label,need_kind=True)
         if setting.get('cover') and setting['cover'].get('mode')=='file':
@@ -947,14 +954,15 @@ class WorkbenchService:
         if (p.get('output') or {}).get('path')!=(x.get('output') or {}).get('path'):raise ServiceError('render/output generation changed')
         jid=j['id'];d=self.queue.root/jid
         if x['settings']['voice']:
+            voice_lines=apply_rules(x['lines'],x['settings'].get('pronunciations') or [])
             speed=float(x['settings'].get('speed') or 1.0)
             engine=x['settings'].get('voice_engine','qwen')
             if engine=='vox':
                 self.queue.update(jid,stage='voice',progress=5)
-                receipt=self._run_voice_request('vox',{'lines':x['lines'],'voice':x['settings'].get('vox_voice','natural_female'),'speed':speed,'vox_clone_dir':str(self._vox_clone_dir())},d,cancel)
+                receipt=self._run_voice_request('vox',{'lines':voice_lines,'voice':x['settings'].get('vox_voice','natural_female'),'speed':speed,'vox_clone_dir':str(self._vox_clone_dir())},d,cancel)
             else:
                 # Keep the original Qwen process/module invocation intact.
-                req=d/'voice-request.json';req.write_text(json.dumps({'lines':x['lines'],'speaker':x['settings']['speaker'],'tts_model':self.cfg.tts_model,'speed':speed,'ffmpeg':self.cfg.ffmpeg},ensure_ascii=False),encoding='utf8')
+                req=d/'voice-request.json';req.write_text(json.dumps({'lines':voice_lines,'speaker':x['settings']['speaker'],'tts_model':self.cfg.tts_model,'speed':speed,'ffmpeg':self.cfg.ffmpeg},ensure_ascii=False),encoding='utf8')
                 with self.gpu_mutex:
                     gpu_preflight(self.cfg)
                     with gpu_guard(self.cfg):

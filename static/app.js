@@ -36,11 +36,11 @@ async function load(){try{setErr('');if(state.draftProductId==null||state.draftP
   state.needReload=false;
 }catch(e){state.needReload=true;setErr('服务暂不可用：'+e.message+'（稍等片刻会自动恢复）')}}
 /* ---------- 设置：读取/保存（记住上次选择） ---------- */
-const DEFAULTS={voice:true,subtitles:true,speaker:'Serena',voice_engine:'qwen',vox_voice:'natural_female',speed:1.0,sentence_gap_seconds:null,target_seconds:0,shot_reuse:1,subtitle_size:54,subtitle_bottom:380,subtitle_border:3,subtitle_style:'classic',highlight_source:'ai',subtitle_highlight:true,sticker_enabled:true,sfx_enabled:true,flower_enabled:true,flower_style:'auto',flower_density:'high',dedup:'off',beauty:false,beauty_strength:0.25,visual_filter:'original',visual_filter_strength:0.35,bgm:false,bgm_path:'',bgm_volume:0.2,cover:null,intro:null,outro:null,logo_enabled:false,logo_path:'',logo_sha256:'',logo_pos:'tr',logo_scale:0.16,logo_opacity:0.9,watermark_enabled:false,watermark_text:'',watermark_pos:'br',watermark_size:36,watermark_opacity:0.6};
+const DEFAULTS={voice:true,subtitles:true,speaker:'Serena',voice_engine:'qwen',vox_voice:'natural_female',speed:1.0,sentence_gap_seconds:null,target_seconds:0,shot_reuse:1,subtitle_size:54,subtitle_bottom:380,subtitle_border:3,subtitle_style:'classic',highlight_source:'ai',subtitle_highlight:true,sticker_enabled:true,sfx_enabled:true,flower_enabled:true,flower_style:'auto',flower_density:'high',dedup:'off',beauty:false,beauty_strength:0.25,visual_filter:'original',visual_filter_strength:0.35,bgm:false,bgm_path:'',bgm_volume:0.2,voice_volume:1,pronunciations:[],subtitle_overrides:[],cover:null,intro:null,outro:null,logo_enabled:false,logo_path:'',logo_sha256:'',logo_pos:'tr',logo_scale:0.16,logo_opacity:0.9,overlay_enabled:false,overlay_images:[],watermark_enabled:false,watermark_text:'',watermark_pos:'br',watermark_size:36,watermark_opacity:0.6};
 function productSettings(){return Object.assign({},DEFAULTS,state.product&&state.product.settings||{})}
 function hydrateSettings(){if(state.product&&state.settingsTimers&&state.settingsTimers[state.product.id])return;
   const s=productSettings();
-  if(!state.cover&&s.cover)state.cover=s.cover;if(!state.intro&&s.intro)state.intro=s.intro;if(!state.outro&&s.outro)state.outro=s.outro;state.bgm=null;state.logo=s.logo_path?{path:s.logo_path,sha256:s.logo_sha256||'',name:String(s.logo_path).split(/[\\/]/).pop()}:null}
+  if(!state.cover&&s.cover)state.cover=s.cover;if(!state.intro&&s.intro)state.intro=s.intro;if(!state.outro&&s.outro)state.outro=s.outro;state.bgm=null;state.pronunciations=Array.isArray(s.pronunciations)?s.pronunciations.slice():[];state.subtitleOverrides=Array.isArray(s.subtitle_overrides)?s.subtitle_overrides.slice():[];state.overlayEnabled=!!s.overlay_enabled;state.overlays=Array.isArray(s.overlay_images)&&s.overlay_images.length?s.overlay_images.slice():(s.logo_path?[{path:s.logo_path,sha256:s.logo_sha256||'',name:String(s.logo_path).split(/[\\/]/).pop(),pos:s.logo_pos||'tr',scale:s.logo_scale??.16,opacity:s.logo_opacity??.9}]:[]);state.logo=s.logo_path?{path:s.logo_path,sha256:s.logo_sha256||'',name:String(s.logo_path).split(/[\\/]/).pop()}:null}
 function collectSettings(){const s=productSettings();
   const num=v=>Number(v)||0;
   const gapMode=$('#sentenceGapMode'),gapInput=$('#sentenceGap');
@@ -71,8 +71,9 @@ function collectSettings(){const s=productSettings();
     dedup:$('#dedup')?$('#dedup').value:s.dedup,
     beauty:$('#beauty')?$('#beauty').checked:!!s.beauty,beauty_strength:$('#beautyStrength')?num($('#beautyStrength').value):Number(s.beauty_strength??.25),
     visual_filter:$('#visualFilter')?$('#visualFilter').value:(s.visual_filter||'original'),visual_filter_strength:$('#visualFilterStrength')?num($('#visualFilterStrength').value):Number(s.visual_filter_strength??.35),
-    logo_enabled:$('#logoOn')?($('#logoOn').checked&&!!(state.logo&&state.logo.path)):!!s.logo_enabled,
-    logo_path:state.logo?state.logo.path:(s.logo_path||''),logo_sha256:state.logo?state.logo.sha256:(s.logo_sha256||''),
+    overlay_enabled:$('#overlayOn')?$('#overlayOn').checked:!!state.overlayEnabled,
+    overlay_images:Array.isArray(state.overlays)?state.overlays.filter(r=>r&&r.path).map(r=>({path:r.path,sha256:r.sha256||'',name:r.name||'',pos:r.pos||'tr',scale:Math.max(.05,Math.min(.40,Number(r.scale??.16))),opacity:Math.max(0,Math.min(1,Number(r.opacity??.9)))})):[],
+    logo_enabled:false,logo_path:'',logo_sha256:'',
     logo_pos:$('#logoPos')?$('#logoPos').value:(s.logo_pos||'tr'),
     logo_scale:$('#logoScale')?Math.max(.05,Math.min(.40,(Number($('#logoScale').value)||16)/100)):Number(s.logo_scale??.16),
     logo_opacity:$('#logoOpacity')?Math.max(0,Math.min(1,(Number($('#logoOpacity').value)||0)/100)):Number(s.logo_opacity??.9),
@@ -81,6 +82,9 @@ function collectSettings(){const s=productSettings();
     watermark_pos:$('#wmPos')?$('#wmPos').value:(s.watermark_pos||'br'),
     watermark_size:$('#wmSize')?parseInt($('#wmSize').value,10)||36:Number(s.watermark_size||36),
     watermark_opacity:$('#wmOpacity')?Math.max(0,Math.min(1,(Number($('#wmOpacity').value)||0)/100)):Number(s.watermark_opacity??.6),
+    voice_volume:$('#voiceVol')?Math.max(0,Math.min(1,(Number($('#voiceVol').value)||100)/100)):Number(s.voice_volume??1),
+    pronunciations:Array.isArray(state.pronunciations)?state.pronunciations.filter(r=>r&&r.from&&r.to).map(r=>({from:String(r.from),to:String(r.to)})):[],
+    subtitle_overrides:Array.isArray(state.subtitleOverrides)?state.subtitleOverrides.map(x=>String(x||'').slice(0,200)):[],
     cover:cover,intro:card(state.intro),outro:card(state.outro),
     width:$('#aspect')?($('#aspect').value==='16:9'?1920:1080):Number(s.width||1080),
     height:$('#aspect')?($('#aspect').value==='16:9'?1080:1920):Number(s.height||1920)}}
@@ -165,35 +169,65 @@ function brandLabels(){
   if(lo&&$('#logoOpacityVal'))$('#logoOpacityVal').textContent=lo.value+'%';
   if(wo&&$('#wmOpacityVal'))$('#wmOpacityVal').textContent=wo.value+'%';
 }
+
+
+function renderSubtitleEditor(){
+  const el=$('#secSubtitleEditor');if(!el)return;
+  if(!state.product){el.innerHTML='<h3><span class="num">3</span>逐句字幕</h3><p class="muted">选择商品后可用。</p>';return}
+  const ta=$('#copy');const lines=splitLines(ta?ta.value:(state.draft||''));
+  if(!lines.length){el.innerHTML='<h3><span class="num">3</span>逐句字幕</h3><p class="muted">先写脚本，再逐句改字幕。</p>';return}
+  const ov=Array.isArray(state.subtitleOverrides)?state.subtitleOverrides:[];
+  el.innerHTML=`<h3><span class="num">3</span>逐句字幕 <small class="muted">只改显示，不改配音</small></h3><div class="sub-edit-rows">${lines.map((line,i)=>`<div class="sub-edit-row"><span class="sub-n">${i+1}</span><div class="sub-orig">${esc(line)}</div><input value="${esc(ov[i]||'')}" placeholder="跟随原句" onchange="updateSubOverride(${i},this.value)"></div>`).join('')}</div>`;
+}
+function updateSubOverride(i,v){if(!Array.isArray(state.subtitleOverrides))state.subtitleOverrides=[];state.subtitleOverrides[i]=String(v).slice(0,200);persistSettings()}
+
+function renderPronunciationBox(){
+  const host=$('#secSubtitle');if(!host)return;
+  let box=$('#pronBox');
+  if(!box){box=document.createElement('div');box.id='pronBox';box.className='pron-box';host.appendChild(box)}
+  const rows=Array.isArray(state.pronunciations)?state.pronunciations:[];
+  box.innerHTML=`<h4>读音矫正 <small class="muted">只改配音，不改字幕</small></h4><div class="pron-rows">${rows.map((r,i)=>`<div class="pron-row"><input value="${esc(r.from||'')}" placeholder="原词" onchange="updatePron(${i},'from',this.value)"><span>→</span><input value="${esc(r.to||'')}" placeholder="读作" onchange="updatePron(${i},'to',this.value)"><button type="button" class="secondary small" onclick="removePron(${i})">删</button></div>`).join('')}</div><button type="button" class="secondary small" onclick="addPron()">＋ 添加读音</button>`;
+}
+function addPron(){if(!Array.isArray(state.pronunciations))state.pronunciations=[];if(state.pronunciations.length>=50)return toast('最多 50 条读音矫正','warn');state.pronunciations.push({from:'',to:''});renderPronunciationBox()}
+function updatePron(i,k,v){if(!state.pronunciations[i])return;state.pronunciations[i][k]=String(v).trim();persistSettings()}
+function removePron(i){if(!Array.isArray(state.pronunciations))return;state.pronunciations.splice(i,1);renderPronunciationBox();persistSettings()}
+
+function overlayLabels(){
+  document.querySelectorAll('.overlay-row').forEach((row,i)=>{const s=row.querySelector('.ov-scale'),o=row.querySelector('.ov-opacity');if(s&&row.querySelector('.ov-scale-val'))row.querySelector('.ov-scale-val').textContent=s.value+'%';if(o&&row.querySelector('.ov-opacity-val'))row.querySelector('.ov-opacity-val').textContent=o.value+'%'});
+}
 function renderBrandBox(){
   const host=$('#secSticker');if(!host)return;
   const s=productSettings();
   let box=$('#brandBox');
   if(!box){box=document.createElement('div');box.id='brandBox';box.className='brand-box';host.appendChild(box)}
   const pos=v=>[['tl','左上'],['tr','右上'],['bl','左下'],['br','右下']].map(([k,n])=>`<option value="${k}" ${v===k?'selected':''}>${n}</option>`).join('');
-  const logoName=state.logo?esc(state.logo.name||'已上传'):'未上传';
-  box.innerHTML=`<h4>自有素材</h4>
-  <label><input id="logoOn" type="checkbox" ${s.logo_enabled?'checked':''} onchange="persistSettings()"> 图片 Logo</label>
-  <div class="row brand-upload"><button type="button" class="secondary small" onclick="document.getElementById('logoFile').click()">${state.logo?'更换图片':'上传图片'}</button><span class="muted small" id="logoName">${logoName}</span><input type="file" id="logoFile" accept="image/png,image/jpeg,image/webp" style="display:none" onchange="logoUpload(event)"></div>
-  <div class="brand-grid"><label>位置 <select id="logoPos" onchange="persistSettings()">${pos(s.logo_pos)}</select></label>
-  <label>大小 <input id="logoScale" type="range" min="5" max="40" step="1" value="${Math.round(Number(s.logo_scale??.16)*100)}" oninput="brandLabels()" onchange="persistSettings()"><b id="logoScaleVal">${Math.round(Number(s.logo_scale??.16)*100)}%</b></label>
-  <label>透明度 <input id="logoOpacity" type="range" min="0" max="100" step="5" value="${Math.round(Number(s.logo_opacity??.9)*100)}" oninput="brandLabels()" onchange="persistSettings()"><b id="logoOpacityVal">${Math.round(Number(s.logo_opacity??.9)*100)}%</b></label></div>
+  const rows=Array.isArray(state.overlays)?state.overlays:[];
+  const list=rows.map((r,i)=>`<div class="overlay-row"><div class="overlay-name"><b>${esc(r.name||('图片 '+(i+1)))}</b><button type="button" class="secondary small" onclick="removeOverlay(${i})">删</button></div><div class="overlay-controls"><label>位置<select onchange="updateOverlay(${i},'pos',this.value)">${pos(r.pos)}</select></label><label>大小<input class="ov-scale" type="range" min="5" max="40" step="1" value="${Math.round(Number(r.scale??.16)*100)}" oninput="overlayLabels()" onchange="updateOverlay(${i},'scale',Number(this.value)/100)"><b class="ov-scale-val">${Math.round(Number(r.scale??.16)*100)}%</b></label><label>透明度<input class="ov-opacity" type="range" min="0" max="100" step="5" value="${Math.round(Number(r.opacity??.9)*100)}" oninput="overlayLabels()" onchange="updateOverlay(${i},'opacity',Number(this.value)/100)"><b class="ov-opacity-val">${Math.round(Number(r.opacity??.9)*100)}%</b></label></div></div>`).join('');
+  box.innerHTML=`<h4>图片叠加 <small class="muted">最多 20 张，整条显示</small></h4>
+  <label><input id="overlayOn" type="checkbox" ${state.overlayEnabled?'checked':''} onchange="state.overlayEnabled=this.checked;persistSettings()"> 启用图片叠加</label>
+  <div class="row brand-upload"><button type="button" class="secondary small" onclick="document.getElementById('overlayFile').click()">上传图片</button><span class="muted small">${rows.length}/20</span><input type="file" id="overlayFile" accept="image/png,image/jpeg,image/webp" multiple style="display:none" onchange="overlayUpload(event)"></div>
+  <div class="overlay-list">${list||'<p class="muted small">还没有图片，可上传 Logo/贴纸/商品图。</p>'}</div>
   <label><input id="wmOn" type="checkbox" ${s.watermark_enabled?'checked':''} onchange="persistSettings()"> 文字水印</label>
   <input id="wmText" maxlength="40" placeholder="例如 @yourbrand" value="${esc(s.watermark_text||'')}" onchange="persistSettings()">
   <div class="brand-grid"><label>位置 <select id="wmPos" onchange="persistSettings()">${pos(s.watermark_pos)}</select></label>
   <label>字号 <input id="wmSize" type="number" min="18" max="96" step="2" value="${Number(s.watermark_size||36)}" onchange="persistSettings()"></label>
   <label>透明度 <input id="wmOpacity" type="range" min="0" max="100" step="5" value="${Math.round(Number(s.watermark_opacity??.6)*100)}" oninput="brandLabels()" onchange="persistSettings()"><b id="wmOpacityVal">${Math.round(Number(s.watermark_opacity??.6)*100)}%</b></label></div>`;
 }
-async function logoUpload(ev){
-  const f=ev.target.files&&ev.target.files[0];ev.target.value='';if(!f||!state.product)return;
-  if(f.size>12*1024*1024)return toast('图片需小于 12MB','warn');
-  try{const r=await api(`/api/products/${state.product.id}/overlay-file`,{method:'POST',headers:{'Content-Type':f.type||'image/png'},body:f,timeoutMs:60000});
-    state.logo={path:r.path,sha256:r.sha256,name:f.name||r.name};
-    const on=$('#logoOn');if(on)on.checked=true;
-    renderBrandBox();persistSettings();toast('Logo 已上传');
-  }catch(e){toast(e.message,'warn')}
+function updateOverlay(i,k,v){if(!state.overlays[i])return;state.overlays[i][k]=v;persistSettings()}
+function removeOverlay(i){if(!Array.isArray(state.overlays))return;state.overlays.splice(i,1);renderBrandBox();persistSettings()}
+async function overlayUpload(ev){
+  const files=[...(ev.target.files||[])];ev.target.value='';if(!files.length||!state.product)return;
+  if(!Array.isArray(state.overlays))state.overlays=[];
+  for(const f of files){
+    if(state.overlays.length>=20){toast('最多 20 张图片','warn');break}
+    if(f.size>12*1024*1024){toast(f.name+' 超过 12MB，已跳过','warn');continue}
+    try{
+      const r=await api(`/api/products/${state.product.id}/overlay-file`,{method:'POST',headers:{'Content-Type':f.type||'image/png'},body:f,timeoutMs:60000});
+      state.overlays.push({path:r.path,sha256:r.sha256,name:f.name||r.name,pos:'tr',scale:.16,opacity:.9});
+    }catch(e){toast(f.name+'：'+e.message,'warn')}
+  }
+  state.overlayEnabled=state.overlays.length>0;renderBrandBox();persistSettings();
 }
-
 function renderMusicLibrary(){
   const host=$('#secMusic');if(!host)return;
   let box=$('#musicLib');
@@ -226,6 +260,13 @@ function renderPreview(job){
   const q=`product_id=${state.product.id}`;
   box.innerHTML=`<video class="wb-video" src="/api/results/${job.id}?${q}" poster="/api/thumbs/${job.id}?${q}" controls playsinline preload="metadata"></video><div class="wb-preview-meta">${fmtSec(job.duration)} · ${fmtBytes(job.bytes)} · ${fmtClock(job.finished_at)}</div>`;
 }
+
+function voiceVolLabel(){const el=$('#voiceVol'),b=$('#voiceVolVal');if(el&&b)b.textContent=el.value+'%'}
+function filterSpeakers(kind){
+  document.querySelectorAll('#speaker optgroup').forEach(g=>{g.hidden=!(kind==='all'||g.label===kind)});
+  document.querySelectorAll('.voice-filter .chip').forEach(b=>b.classList.toggle('on',b.dataset.g===kind));
+}
+
 function renderScript(){const el=$('#secScript');if(!el)return;
   if(!state.product){el.innerHTML='<h3><span class="num">2</span>脚本生产</h3><p class="muted">选择商品后可用。</p>';['secParams','secAdvanced','secBatch','secVoice','secSubtitle','secSticker','secFlower','secMusic','secOther'].forEach(id=>{const n=document.getElementById(id);if(n)n.innerHTML=''});return}
   const s=productSettings();const engine=s.voice_engine||'qwen';const text=(state.draft!==''||state.draftProductId===state.product.id)?state.draft:(state.product.copy?.text||'');
@@ -234,13 +275,15 @@ function renderScript(){const el=$('#secScript');if(!el)return;
   const outroName=state.outro?(state.outro.name||String(state.outro.path||'').split(/[\\/]/).pop()):'';
   const html=`<h3><span class="num">2</span>脚本生产 <small class="muted">${esc(state.product.name)}</small></h3>
 <label for="copy">口播文案 <span class="muted">（一行一句；多条脚本之间用单独一行 --- 分隔）</span></label>
-<textarea id="copy" rows="8" oninput="onCopyInput()">${esc(text)}</textarea>
+<textarea id="copy" rows="8" oninput="onCopyInput()" onblur="renderSubtitleEditor()">${esc(text)}</textarea>
 <div class="ai-row"><button class="secondary" id="btnAIGen" onclick="aiTogglePanel()">✨ AI 生成</button><button class="secondary" id="btnAIRewrite" onclick="toggleAiRewritePanel()" ${state.aiBusy?'disabled':''}>AI 洗文案</button><button class="secondary" id="btnAIPolish" onclick="aiRun('polish')">润色</button><button class="secondary" id="btnAIColloq" onclick="aiRun('colloquial')">改口语化</button><button class="secondary" id="btnAISplit" onclick="aiRun('split')">AI 断句</button><button class="secondary" id="btnAIFission" onclick="aiRun('variants')">AI 裂变 N 稿</button><button class="secondary" id="btnAIClean" onclick="cleanCopyLocal()">清理标点</button><button class="secondary" id="btnAIUndo" onclick="undoClean()" style="${state.cleanUndo===null?'display:none':''}">撤销清理</button><button class="secondary" id="btnAIPack" onclick="aiRun('pack')">投放包</button><button class="secondary" id="btnAIAudit" onclick="aiRun('audit')">合规体检</button><button class="secondary" id="btnAIFit" onclick="aiRun('fit')">按时长优化</button><span id="aiStatus" class="muted"></span></div>
 <div id="aiRewritePanel" class="ai-rewrite-panel" ${state.aiRewriteOpen?'':'hidden'}><label for="aiRewriteReason">拒审原因或改写要求（可选）</label><textarea id="aiRewriteReason" rows="2" maxlength="2000" placeholder="例如：平台提示功效夸大，可不填" oninput="rewriteReasonInput()">${esc((rewriteState()||{}).reason||'')}</textarea><div class="row"><button class="primary" id="btnAIRewriteStart" onclick="aiRun('rewrite')" ${state.aiBusy?'disabled':''}>开始优化</button><span class="muted">仅优化文字，不保证平台审核结果</span></div><div id="rewriteHint" class="muted">只发送文案、产品名和这段要求</div><div id="rewritePreview" class="ai-rewrite-preview" hidden><div class="row"><b>AI 洗文案预览</b><span class="muted">未采用，不会改变编辑框</span><span class="muted" id="rewriteLen"></span></div><pre id="aiRewritePreviewBody"></pre><div class="row"><button class="primary small" id="btnRewriteAdopt" onclick="adoptRewrite()">采用新稿</button><button class="secondary small" id="btnRewriteUndo" onclick="undoRewrite()">撤销采用</button></div></div></div>
 <div id="aiOut" class="ai-out" hidden><div class="row"><b id="aiOutTitle"></b><span class="row"><button class="secondary small" onclick="copyAiOut()">复制全部</button><button class="secondary small" onclick="closeAiOut()">收起</button></span></div><pre id="aiOutBody"></pre></div>
 <div id="aiPanel" class="ai-panel" ${state.aiOpen?'':'hidden'}><div class="advgrid"><label>产品名 <input id="aiName" placeholder="例如：厨房收纳架" value="${esc(state.product.name)}"></label><label class="wide">卖点 <textarea id="aiPoints" rows="2" placeholder="一行一个，例如：分格收纳、可拆洗、适合厨房台面"></textarea></label><label>人群 <input id="aiAudience" placeholder="例如：30-50 岁上班族"></label><label>风格 <input id="aiStyle" placeholder="例如：亲切、生活化"></label></div><div class="row"><button class="primary" id="btnAIGenerateStart" onclick="aiRun('generate')">开始生成</button><button class="secondary" onclick="aiTogglePanel()">收起</button></div><div class="ai-krow"><details class="adv" open><summary>AI 接口设置（填一次就记住）</summary><div class="advgrid"><label>接口地址 <input id="aiBaseUrl" placeholder="https://api.deepseek.com"></label><label>密钥 <span class="row"><input id="aiKey" type="password" placeholder="${state.aiHasKey?'已配置（留空不改动）':'未配置'}"><button class="secondary small" onclick="saveAiSettings()">保存</button><button class="secondary small" id="aiKeyClear" onclick="clearAiKey()" style="${state.aiHasKey?'':'display:none'}">清除密钥</button></span></label><span class="muted wide">密钥只保存在这台 Win 机上，不会显示回页面；留空则保持原密钥不变。使用 AI 时，文案和产品信息会发送给所填写的服务商。</span></div><details><summary>高级：模型名称（可选）</summary><label>模型 <input id="aiModel" placeholder="服务商提供的模型 ID；留空保持原值"></label></details></details></div></div>
 <div class="settings-row"><label><input id="voice" type="checkbox" ${s.voice?'checked':''} onchange="onVoiceToggle()"> 语音</label><label><input id="subs" type="checkbox" ${s.subtitles?'checked':''} onchange="onSettingChange()"> 字幕</label><label class="voice-engine-label">配音 <select id="voiceEngine" onchange="onEngineChange()"><option value="qwen" ${engine==='qwen'?'selected':''}>Qwen（原配音）</option><option value="vox" ${engine==='vox'?'selected':''}>Vox（新配音·试用）</option></select></label><label class="slider-label">语速 <input id="speed" type="range" min="0.85" max="1.5" step="0.05" value="${Number(s.speed)||1}" oninput="onSpeedInput()"> <b id="speedVal">${(Number(s.speed)||1).toFixed(2).replace(/0$/,'').replace(/\.$/,'.0')}×</b></label><label>句间停顿 <select id="sentenceGapMode" ${s.voice?'':'disabled'} onchange="onSentenceGapModeChange()"><option value="auto" ${s.sentence_gap_seconds==null?'selected':''}>自动（0.18–0.35 秒）</option><option value="manual" ${s.sentence_gap_seconds!=null?'selected':''}>手动</option></select> <input id="sentenceGap" type="number" min="0.10" max="1.00" step="0.01" value="${s.sentence_gap_seconds==null?'':Number(s.sentence_gap_seconds).toFixed(2)}" placeholder="0.10–1.00" ${s.voice?'':'disabled'} oninput="onSentenceGapInput()"> 秒</label><label>目标时长 <input id="target" type="number" min="0" max="3600" step="1" value="${Number(s.target_seconds)||''}" placeholder="不设" oninput="renderEstimate();persistSettings()"> 秒</label></div>
 <div class="settings-row voice-row">
+<div class="voice-filter"><button type="button" class="chip on" data-g="all" onclick="filterSpeakers('all')">全部</button><button type="button" class="chip" data-g="女声" onclick="filterSpeakers('女声')">女声</button><button type="button" class="chip" data-g="男声" onclick="filterSpeakers('男声')">男声</button><button type="button" class="chip" data-g="方言" onclick="filterSpeakers('方言')">方言</button></div>
+<label class="slider-label">配音音量 <input id="voiceVol" type="range" min="0" max="100" step="5" value="${Math.round(Number(s.voice_volume??1)*100)}" oninput="voiceVolLabel()" onchange="persistSettings()"> <b id="voiceVolVal">${Math.round(Number(s.voice_volume??1)*100)}%</b></label>
 <label class="engine-control qwen-control" style="${engine==='qwen'?'':'display:none'}">Qwen 说话人 <select id="speaker" onchange="onSettingChange()"><optgroup label="女声"><option value="Serena" ${s.speaker==='Serena'?'selected':''}>女声 1 · 自然</option><option value="Vivian" ${s.speaker==='Vivian'?'selected':''}>女声 2 · 清晰</option><option value="Ono_Anna" ${s.speaker==='Ono_Anna'?'selected':''}>女声 3 · 日系</option><option value="Sohee" ${s.speaker==='Sohee'?'selected':''}>女声 4 · 韩系</option></optgroup><optgroup label="男声"><option value="Uncle_Fu" ${s.speaker==='Uncle_Fu'?'selected':''}>男声 1 · 成熟</option><option value="Ryan" ${s.speaker==='Ryan'?'selected':''}>男声 2 · 沉稳</option><option value="Aiden" ${s.speaker==='Aiden'?'selected':''}>男声 3 · 年轻</option></optgroup><optgroup label="方言"><option value="Eric" ${s.speaker==='Eric'?'selected':''}>男声 · 四川话</option><option value="Dylan" ${s.speaker==='Dylan'?'selected':''}>男声 · 北京话</option></optgroup></select></label>
 <label class="engine-control vox-control" style="${engine==='vox'?'':'display:none'}">Vox 声音 <select id="voxVoice" onchange="onSettingChange()">${voxVoiceOptions(s.vox_voice)}</select><button class="secondary small" onclick="refreshVoxVoices()" title="重新扫描克隆文件夹">刷新音色</button><span class="muted" title="${esc(state.voxCloneDir)}">丢音频到克隆文件夹即可添加：${esc(state.voxCloneDir||'读取中…')}</span></label><button class="secondary small" id="btnVoicePreview" onclick="previewVoice()" ${state.previewBusy?'disabled':''}>${state.previewBusy?'正在试听…':'试听当前配音'}</button><span id="voicePreviewStatus" class="muted"></span><audio id="voicePreviewAudio" controls preload="none" style="${state.previewAudio?'':'display:none'}" src="${state.previewAudio?esc(state.previewAudio):''}"></audio>
 </div>
@@ -281,7 +324,7 @@ function renderScript(){const el=$('#secScript');if(!el)return;
   if(adv)adv.innerHTML=(cutAdv>0&&cutBatch>cutAdv)?html.slice(cutAdv,cutBatch):'';
   const batchEl=$('#secBatch');
   if(batchEl)batchEl.innerHTML=cutBatch>0?html.slice(cutBatch):'';
-  distributeSettings();renderMusicLibrary();renderBrandBox();renderBatchBox();renderCopyList();renderEstimate();syncSentenceGapUI();renderRewritePreview();aiBusySet(state.aiBusy,state.aiBusyMessage)}
+  renderSubtitleEditor();distributeSettings();renderPronunciationBox();renderMusicLibrary();renderBrandBox();renderBatchBox();renderCopyList();renderEstimate();syncSentenceGapUI();renderRewritePreview();aiBusySet(state.aiBusy,state.aiBusyMessage)}
 function syncSentenceGapUI(){const voice=$('#voice'),mode=$('#sentenceGapMode'),input=$('#sentenceGap');const muted=!!voice&&!voice.checked;const auto=!mode||mode.value==='auto';if(mode)mode.disabled=muted;if(input){input.disabled=muted||auto;if(auto)input.value=''}}
 function onVoiceToggle(){syncSentenceGapUI();timingChanged();persistSettings()}
 function onSentenceGapModeChange(){const mode=$('#sentenceGapMode'),input=$('#sentenceGap');if(mode&&mode.value==='manual'&&input&&!String(input.value||'').trim())input.value='0.10';if(mode&&mode.value==='auto'&&input)input.value='';syncSentenceGapUI();timingChanged();persistSettings()}

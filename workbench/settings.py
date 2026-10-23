@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import Optional
 import math
 from .voice_engines import is_clone_voice_id
+from .pronunciation import normalize_rules
 from .subtitles import SUBTITLE_STYLES
 from .flower_text import STYLES as FLOWER_STYLES
 
@@ -43,11 +44,13 @@ def _check_cover(v):
 
 @dataclass(frozen=True)
 class ProductionSettings:
-    voice:bool=False;speaker:str='Serena';voice_engine:str='qwen';vox_voice:str='natural_female';subtitles:bool=True;subtitle_size:int=54;subtitle_bottom:int=380;subtitle_border:int=3;subtitle_style:str='classic';highlight_source:str='ai';subtitle_highlight:bool=True;sticker_enabled:bool=True;sfx_enabled:bool=True;flower_enabled:bool=True;flower_style:str='auto';flower_density:str='high';bgm:bool=False;bgm_path:str='';bgm_volume:float=0.20;dedup:str='off';beauty:bool=False;beauty_strength:float=0.25;visual_filter:str='original';visual_filter_strength:float=0.35;speed:float=1.0;sentence_gap_seconds:Optional[float]=None;target_seconds:int=0;shot_reuse:int=1;cover:Optional[dict]=None;intro:Optional[dict]=None;outro:Optional[dict]=None;width:int=1080;height:int=1920;fps:int=30;codec:str='h264';logo_enabled:bool=False;logo_path:str='';logo_sha256:str='';logo_pos:str='tr';logo_scale:float=0.16;logo_opacity:float=0.9;watermark_enabled:bool=False;watermark_text:str='';watermark_pos:str='br';watermark_size:int=36;watermark_opacity:float=0.6
+    voice:bool=False;speaker:str='Serena';voice_engine:str='qwen';vox_voice:str='natural_female';subtitles:bool=True;subtitle_size:int=54;subtitle_bottom:int=380;subtitle_border:int=3;subtitle_style:str='classic';highlight_source:str='ai';subtitle_highlight:bool=True;sticker_enabled:bool=True;sfx_enabled:bool=True;flower_enabled:bool=True;flower_style:str='auto';flower_density:str='high';bgm:bool=False;bgm_path:str='';bgm_volume:float=0.20;dedup:str='off';beauty:bool=False;beauty_strength:float=0.25;visual_filter:str='original';visual_filter_strength:float=0.35;speed:float=1.0;sentence_gap_seconds:Optional[float]=None;target_seconds:int=0;shot_reuse:int=1;cover:Optional[dict]=None;intro:Optional[dict]=None;outro:Optional[dict]=None;width:int=1080;height:int=1920;fps:int=30;codec:str='h264';logo_enabled:bool=False;logo_path:str='';logo_sha256:str='';logo_pos:str='tr';logo_scale:float=0.16;logo_opacity:float=0.9;watermark_enabled:bool=False;watermark_text:str='';watermark_pos:str='br';watermark_size:int=36;watermark_opacity:float=0.6;voice_volume:float=1.0;pronunciations:Optional[list]=None;subtitle_overrides:Optional[list]=None;overlay_enabled:bool=False;overlay_images:Optional[list]=None
     @classmethod
     def from_dict(cls,d):
         if set(d)-set(cls.__dataclass_fields__):raise ValueError('unknown production setting')
-        x=cls(**d);x.validate();return x
+        data=dict(d)
+        if 'pronunciations' in data:data['pronunciations']=normalize_rules(data['pronunciations'])
+        x=cls(**data);x.validate();return x
     def validate(self):
         for k in ('voice','subtitles','bgm','beauty'):
             if type(getattr(self,k)) is not bool:raise ValueError(f'{k} must be boolean')
@@ -95,6 +98,27 @@ class ProductionSettings:
         if self.watermark_pos not in ('tl','tr','bl','br'):raise ValueError('水印位置需为 tl/tr/bl/br')
         if type(self.watermark_size) is not int or not 18<=self.watermark_size<=96:raise ValueError('水印字号需在 18–96')
         if type(self.watermark_opacity) not in (int,float) or not 0<=float(self.watermark_opacity)<=1:raise ValueError('水印透明度需在 0–1')
+        if type(self.voice_volume) not in (int,float) or not 0<=float(self.voice_volume)<=1:raise ValueError('配音音量需在 0–1')
+        normalize_rules(self.pronunciations)
+        if self.subtitle_overrides is not None:
+            if not isinstance(self.subtitle_overrides,list) or len(self.subtitle_overrides)>500:raise ValueError('逐句字幕最多 500 行')
+            for row in self.subtitle_overrides:
+                if not isinstance(row,str) or len(row)>200 or any(ord(c)<32 and c not in '\n\t' for c in row):raise ValueError('逐句字幕必须是 200 字以内的文字')
+        if type(self.overlay_enabled) is not bool:raise ValueError('overlay_enabled must be boolean')
+        if self.overlay_images is not None:
+            if not isinstance(self.overlay_images,list) or len(self.overlay_images)>20:raise ValueError('叠加图片最多 20 张')
+            for row in self.overlay_images:
+                if not isinstance(row,dict) or set(row)-{'path','sha256','name','pos','scale','opacity'}:raise ValueError('叠加图片设置含未知字段')
+                path=row.get('path')
+                if not isinstance(path,str) or not Path(path).is_file():raise ValueError('叠加图片不存在')
+                if Path(path).suffix.lower() not in ('.png','.jpg','.jpeg','.webp'):raise ValueError('叠加图片需为 PNG/JPG/WebP')
+                if row.get('pos') not in ('tl','tr','bl','br'):raise ValueError('叠加图片位置需为 tl/tr/bl/br')
+                for k in ('scale','opacity'):
+                    v=row.get(k)
+                    if type(v) not in (int,float) or not 0<=float(v)<=1:raise ValueError(f'叠加图片 {k} 范围需为 0–1')
+                if not 0.05<=float(row['scale'])<=0.40:raise ValueError('叠加图片大小需在 5%–40%')
+                sha=row.get('sha256')
+                if sha and (not isinstance(sha,str) or len(sha)!=64):raise ValueError('叠加图片指纹无效')
         if self.cover is not None:_check_cover(self.cover)
         if self.intro is not None:_check_card(self.intro,'片头')
         if self.outro is not None:_check_card(self.outro,'片尾')

@@ -200,3 +200,26 @@ button.miniact{cursor:pointer}
 .brand-grid label{display:flex;flex-direction:column;gap:4px;font-size:12px}
 .brand-grid input[type=range]{width:100%}
 #wmText{width:100%;margin-top:6px}
+
+.voice-filter{display:flex;gap:4px;flex-wrap:wrap;width:100%}
+.voice-filter .chip{cursor:pointer;border:1px solid var(--line);background:transparent}
+.voice-filter .chip.on{background:var(--primary);color:#fff;border-color:var(--primary)}
+.pron-box{margin-top:12px;border-top:1px solid var(--line);padding-top:10px}
+.pron-box h4{margin:0 0 8px;font-size:13px}
+.pron-rows{display:flex;flex-direction:column;gap:6px;margin-bottom:8px}
+.pron-row{display:flex;align-items:center;gap:6px}
+.pron-row input{flex:1;min-width:0}
+
+.sub-edit-rows{display:flex;flex-direction:column;gap:6px}
+.sub-edit-row{display:grid;grid-template-columns:22px 1fr 1.1fr;align-items:center;gap:8px}
+.sub-n{color:var(--muted);font-size:11px;text-align:right}
+.sub-orig{font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sub-edit-row input{min-width:0}
+
+.overlay-list{display:flex;flex-direction:column;gap:8px;margin:8px 0}
+.overlay-row{border:1px solid var(--line);border-radius:8px;padding:6px 8px}
+.overlay-name{display:flex;align-items:center;justify-content:space-between;gap:6px;font-size:12px}
+.overlay-controls{display:flex;flex-direction:column;gap:4px;margin-top:4px}
+.overlay-controls label{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted)}
+.overlay-controls input[type=range]{flex:1;min-width:0}
+.overlay-controls select{max-width:90px}
