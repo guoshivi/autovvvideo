@@ -7,7 +7,9 @@ matches the current copy.  Every style is deterministic for the same text.
 from __future__ import annotations
 
 import hashlib
+import io
 import math
+from functools import lru_cache
 import unicodedata
 from pathlib import Path
 
@@ -271,6 +273,12 @@ def render(text: str, style: str, font_path: str | None = None, scale: float = 1
     canvas.alpha_composite(shadow, (20 + off, 20 + off))
     canvas.alpha_composite(txt, (20, 20))
     return _rotated(canvas, angle * 0.7)
+
+
+@lru_cache(maxsize=64)
+def preview_png(text: str, style: str, font_path: str | None = None, scale: float = 0.5) -> bytes:
+    im = render(text, style, font_path=font_path, scale=scale)
+    buf = io.BytesIO(); im.save(buf, 'PNG'); return buf.getvalue()
 
 
 def save(text: str, style: str, path, font_path: str | None = None, scale: float = 1.0):

@@ -242,6 +242,16 @@ function addPron(){if(!Array.isArray(state.pronunciations))state.pronunciations=
 function updatePron(i,k,v){if(!state.pronunciations[i])return;state.pronunciations[i][k]=String(v).trim();persistSettings()}
 function removePron(i){if(!Array.isArray(state.pronunciations))return;state.pronunciations.splice(i,1);renderPronunciationBox();persistSettings()}
 
+
+function renderFlowerGallery(){
+  const host=$('#secFlower');if(!host)return;
+  let box=$('#flowerGallery');if(!box){box=document.createElement('div');box.id='flowerGallery';box.className='flower-gallery';host.appendChild(box)}
+  const sel=$('#flowerStyle');if(!sel||!sel.options)return;
+  const opts=[...sel.options].filter(o=>o.value!=='auto');
+  box.innerHTML=`<div class="flower-gallery-head">样式预览 <small class="muted">点一张直接换</small></div><div class="flower-cards"><button type="button" class="flower-card ${sel.value==='auto'?'active':''}" onclick="pickFlowerStyle('auto')"><span class="flower-auto">智能<br>匹配</span><b>智能</b></button>${opts.map(o=>`<button type="button" class="flower-card ${sel.value===o.value?'active':''}" onclick="pickFlowerStyle('${o.value}')"><img loading="lazy" src="/api/flower-preview/${o.value}?text=爆款" alt=""><b>${esc(o.textContent)}</b></button>`).join('')}</div>`;
+}
+function pickFlowerStyle(v){const sel=$('#flowerStyle');if(!sel)return;sel.value=v;sel.dispatchEvent(new Event('change'));document.querySelectorAll('#flowerGallery .flower-card').forEach(b=>b.classList.toggle('active',b.getAttribute('onclick').includes("'"+v+"'")));}
+
 function overlayLabels(){
   document.querySelectorAll('.overlay-row').forEach((row,i)=>{const s=row.querySelector('.ov-scale'),o=row.querySelector('.ov-opacity');if(s&&row.querySelector('.ov-scale-val'))row.querySelector('.ov-scale-val').textContent=s.value+'%';if(o&&row.querySelector('.ov-opacity-val'))row.querySelector('.ov-opacity-val').textContent=o.value+'%'});
 }
@@ -374,7 +384,7 @@ function renderScript(){const el=$('#secScript');if(!el)return;
   if(adv)adv.innerHTML=(cutAdv>0&&cutBatch>cutAdv)?html.slice(cutAdv,cutBatch):'';
   const batchEl=$('#secBatch');
   if(batchEl)batchEl.innerHTML=cutBatch>0?html.slice(cutBatch):'';
-  renderSubtitleEditor();distributeSettings();renderPronunciationBox();renderMusicLibrary();renderBrandBox();polishSettings();groupSettings();renderBatchBox();renderCopyList();renderEstimate();syncSentenceGapUI();renderRewritePreview();aiBusySet(state.aiBusy,state.aiBusyMessage)}
+  renderSubtitleEditor();distributeSettings();renderPronunciationBox();renderMusicLibrary();renderBrandBox();renderFlowerGallery();polishSettings();groupSettings();renderBatchBox();renderCopyList();renderEstimate();syncSentenceGapUI();renderRewritePreview();aiBusySet(state.aiBusy,state.aiBusyMessage)}
 function syncSentenceGapUI(){const voice=$('#voice'),mode=$('#sentenceGapMode'),input=$('#sentenceGap');const muted=!!voice&&!voice.checked;const auto=!mode||mode.value==='auto';if(mode)mode.disabled=muted;if(input){input.disabled=muted||auto;if(auto)input.value=''}}
 function onVoiceToggle(){syncSentenceGapUI();timingChanged();persistSettings()}
 function onSentenceGapModeChange(){const mode=$('#sentenceGapMode'),input=$('#sentenceGap');if(mode&&mode.value==='manual'&&input&&!String(input.value||'').trim())input.value='0.10';if(mode&&mode.value==='auto'&&input)input.value='';syncSentenceGapUI();timingChanged();persistSettings()}

@@ -6,7 +6,7 @@ from email.message import Message
 from contextlib import ExitStack
 from .media import range_response,sha256
 from .browser import BrowserError
-from . import music
+from . import music, flower_text
 class WorkbenchHandler(BaseHTTPRequestHandler):
     server_version='Workbench/2.0'
     def log_message(self,*args):return
@@ -159,6 +159,12 @@ class WorkbenchHandler(BaseHTTPRequestHandler):
                     roots.append({'id':i,'name':tail,'path':str(r)})
                 return self._json(roots)
             if u.path=='/api/ai-settings':return self._json(svc.ai_settings())
+            if u.path.startswith('/api/flower-preview/'):
+                style=u.path.rsplit('/',1)[-1]
+                if style not in flower_text.STYLES:self.send_error(404);return
+                text=(q.get('text') or ['爆款'])[0][:6]
+                raw=flower_text.preview_png(text,style,self.server.service.cfg.font_path or None,0.5)
+                self.send_response(200);self.send_header('Content-Type','image/png');self.send_header('Cache-Control','public, max-age=3600');self.send_header('Content-Length',str(len(raw)));self.end_headers();self.wfile.write(raw);return
             if u.path=='/api/music':return self._json(music.list_tracks())
             if u.path.startswith('/api/music/'):
                 p=music.resolve(u.path.rsplit('/',1)[-1])
