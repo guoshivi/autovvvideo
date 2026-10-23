@@ -89,7 +89,7 @@ test('flower style picker lists auto plus every style and is sent through', () =
   vm.runInContext('renderScript()', f.ctx);
   const html = htmlOf(f);
   assert.match(html, /id="flowerStyle"/);
-  for (const value of ['auto', 'burst_red', 'burst_orange', 'glow_title', 'bottom_glow', 'badge', 'tape', 'bubble', 'neon', 'brush', 'shadow3d']) {
+  for (const value of ['auto', 'burst_red', 'burst_orange', 'glow_title', 'bottom_glow', 'badge', 'tape', 'bubble', 'neon', 'brush', 'shadow3d', 'ribbon_badge', 'pendant_tag', 'seal', 'frame_gold']) {
     assert.match(html, new RegExp(`value="${value}"`));
   }
   assert.equal(vm.runInContext('collectSettings().flower_style', f.ctx), 'burst_red');

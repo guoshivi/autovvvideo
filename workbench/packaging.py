@@ -21,6 +21,9 @@ ICON_MEANINGS = {
     'cart': '下单/购买', 'truck': '发货/物流', 'home': '家庭/居家', 'leaf': '天然/草本',
     'sun': '日常/好天气', 'shield': '防护/保护', 'muscle': '结实/有力', 'clap': '叫好/认可',
     'eyes': '注意/看这里', 'bulb': '提示/妙招', 'party': '庆祝/节日', 'phone': '咨询/联系',
+    'crown': '冠军/尊贵', 'rosette': '奖项/认可', 'ribbon': '纪念/节日', 'bell': '提醒/通知',
+    'trophy': '成就/胜利', 'tag': '标签/分类', 'coin': '省钱/成本', 'chain': '牢固/连接',
+    'handbag': '随身/送礼', 'purse': '预算/省钱',
 }
 ICONS = tuple(ICON_MEANINGS)
 
@@ -34,6 +37,11 @@ _ICON_FAMILIES = {
     'sparkle': ('sparkle', 'bulb'), 'bulb': ('bulb', 'sparkle'),
     'box': ('box', 'home', 'truck'), 'home': ('home', 'box'),
     'truck': ('truck', 'box'), 'leaf': ('leaf', 'sun'), 'sun': ('sun', 'leaf'),
+    'crown': ('crown', 'trophy', 'rosette'), 'trophy': ('trophy', 'crown', 'rosette'),
+    'rosette': ('rosette', 'crown', 'ribbon'), 'ribbon': ('ribbon', 'gift', 'party'),
+    'bell': ('bell', 'clock', 'tag'), 'tag': ('tag', 'coin', 'ribbon'),
+    'coin': ('coin', 'money', 'purse'), 'chain': ('chain', 'shield', 'muscle'),
+    'handbag': ('handbag', 'purse', 'gift'), 'purse': ('purse', 'coin', 'money'),
     'heart': ('heart', 'clap'), 'thumb': ('thumb', 'clap'),
 }
 _FLOWER_FAMILIES = {
