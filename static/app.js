@@ -81,7 +81,9 @@ function collectSettings(){const s=productSettings();
     watermark_pos:$('#wmPos')?$('#wmPos').value:(s.watermark_pos||'br'),
     watermark_size:$('#wmSize')?parseInt($('#wmSize').value,10)||36:Number(s.watermark_size||36),
     watermark_opacity:$('#wmOpacity')?Math.max(0,Math.min(1,(Number($('#wmOpacity').value)||0)/100)):Number(s.watermark_opacity??.6),
-    cover:cover,intro:card(state.intro),outro:card(state.outro)}}
+    cover:cover,intro:card(state.intro),outro:card(state.outro),
+    width:$('#aspect')?($('#aspect').value==='16:9'?1920:1080):Number(s.width||1080),
+    height:$('#aspect')?($('#aspect').value==='16:9'?1080:1920):Number(s.height||1920)}}
 function persistSettings(){if(!state.product)return;const productId=state.product.id;let snapshot;
   try{snapshot=collectSettings()}catch(e){toast(e.message,'warn');return}
   const timers=state.settingsTimers||(state.settingsTimers={});clearTimeout(timers[productId]);
@@ -245,6 +247,7 @@ function renderScript(){const el=$('#secScript');if(!el)return;
 <div class="estline"><span id="estChip" class="chip">预计成片约 -- 秒</span><span id="warnChip" class="chip"></span></div>
 <div class="row go-row"><button class="primary big" id="btnGo" onclick="makeJobs()" ${state.indexReady?'':'disabled'}>开始出片</button><span id="goHint" class="muted">${state.indexReady?'':'先在①建立索引，就能一键出片'}</span></div>
 <details class="adv"><summary>高级设置（去重 / 镜头 / BGM / 字幕样式 / 封面 / 片头片尾）</summary><div class="advgrid">
+<label>画面比例 <select id="aspect" onchange="persistSettings()"><option value="9:16" ${Number(s.width)===1920?'':'selected'}>竖屏 9:16</option><option value="16:9" ${Number(s.width)===1920?'selected':''}>横屏 16:9</option></select></label>
 <label>去重 <select id="dedup" onchange="persistSettings()"><option value="off" ${s.dedup==='off'?'selected':''}>关闭</option><option value="light" ${s.dedup==='light'?'selected':''}>轻度</option><option value="double" ${s.dedup==='double'?'selected':''}>双重（保持文字方向）</option></select></label>
 <label>人物轻美颜 <span class="row"><input id="beauty" type="checkbox" ${s.beauty?'checked':''} onchange="persistSettings()"><input id="beautyStrength" type="range" min="0" max="1" step="0.05" value="${Number(s.beauty_strength??.25)}" oninput="persistSettings()"></span></label>
 <label>画面滤镜 <span class="row"><select id="visualFilter" onchange="persistSettings()"><option value="original" ${s.visual_filter==='original'?'selected':''}>原画</option><option value="clear" ${s.visual_filter==='clear'?'selected':''}>清透</option><option value="warm" ${s.visual_filter==='warm'?'selected':''}>暖色</option><option value="cinema" ${s.visual_filter==='cinema'?'selected':''}>电影</option></select><input id="visualFilterStrength" type="range" min="0" max="1" step="0.05" value="${Number(s.visual_filter_strength??.35)}" oninput="persistSettings()"></span></label>

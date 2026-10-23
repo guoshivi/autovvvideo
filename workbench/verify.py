@@ -34,7 +34,7 @@ def decode(ffmpeg,path,out,with_audio,cancel=None,timeout=900):
         return y
     return None
 
-def verify_media(path,ffmpeg,ffprobe,timeline,expected=None,voice_wavs=None,mode='silent',cancel=None,timeout=900,eos_receipts=None,frozen_voice_pcm=None,expected_engine='qwen',sentence_gap_seconds=None):
+def verify_media(path,ffmpeg,ffprobe,timeline,expected=None,voice_wavs=None,mode='silent',cancel=None,timeout=900,eos_receipts=None,frozen_voice_pcm=None,expected_engine='qwen',sentence_gap_seconds=None,width=1080,height=1920):
     """Verify a final file against the immutable original-clock PCM contract.
 
     ``expected`` is the complete, read-only final PCM master.  For mixed audio,
@@ -49,8 +49,8 @@ def verify_media(path,ffmpeg,ffprobe,timeline,expected=None,voice_wavs=None,mode
     # Container bookkeeping can shave a few ticks (±0.002 fps observed) off a
     # segment-joined timeline; accept avg within 0.02 of nominal 30 while still
     # rejecting real rate drift (25fps=5.0 off, NTSC 29.97=0.03 off).
-    spec=len(video)==1 and video[0].get('codec_name')=='h264' and video[0].get('width')==1080 and video[0].get('height')==1920 and _fps(video[0].get('r_frame_rate'))==30 and abs(_fps(video[0].get('avg_frame_rate'))-30)<=0.02
-    if not spec:raise VerificationFailure('verify','video specs',[{k:v.get(k) for k in ('codec_name','width','height','r_frame_rate','avg_frame_rate')} for v in video],'one H264 1080x1920 30fps')
+    spec=len(video)==1 and video[0].get('codec_name')=='h264' and video[0].get('width')==width and video[0].get('height')==height and _fps(video[0].get('r_frame_rate'))==30 and abs(_fps(video[0].get('avg_frame_rate'))-30)<=0.02
+    if not spec:raise VerificationFailure('verify','video specs',[{k:v.get(k) for k in ('codec_name','width','height','r_frame_rate','avg_frame_rate')} for v in video],f'one H264 {width}x{height} 30fps')
     checks['video_specs']=True
     if len(audio)!=(0 if mode=='silent' else 1):raise VerificationFailure('verify','audio streams',len(audio),0 if mode=='silent' else 1)
     if not timeline:raise VerificationFailure('verify','timeline','empty','one or more finite intervals')

@@ -43,32 +43,32 @@ def _caption_vf(settings,caption_file,ass_file,font_file):
     if caption_file:return drawtext_filter(caption_file,font_file,settings['subtitle_size'],settings['subtitle_bottom'],settings.get('subtitle_border',3))
     return None
 
-def _filter(settings,caption_file,font_file,ass_file=None):
-    vf='scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2:black,setsar=1'
+def _filter(settings,caption_file,font_file,ass_file=None,width=1080,height=1920):
+    vf=f'scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:black,setsar=1'
     if settings['dedup']=='light':vf+=',eq=contrast=1.012:saturation=1.015'
     if settings['dedup']=='double':
         # Text and logos must keep their reading direction.  A tiny geometric
         # crop plus restrained colour shift creates a distinct render without
         # horizontal/vertical flips or a 180° rotation.
-        vf+=',scale=1102:1960,crop=1080:1920,eq=contrast=1.025:saturation=1.03'
+        vf+=f',scale={width+22}:{height+40},crop={width}:{height},eq=contrast=1.025:saturation=1.03'
     visual=ffmpeg_filter(settings.get('visual_filter','original'),settings.get('visual_filter_strength',.35))
     if visual:vf+=','+visual
     caption=_caption_vf(settings,caption_file,ass_file,font_file)
     if caption:vf+=','+caption
     return vf
 
-def _card_filter():
-    return 'scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2:black,setsar=1'
+def _card_filter(width=1080,height=1920):
+    return f'scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:black,setsar=1'
 
-def _build_card(config,d,name,entry,cancel):
-    """Build one intro/outro card clip (image or trimmed video) at 1080x1920/30."""
+def _build_card(config,d,name,entry,cancel,width=1080,height=1920):
+    """Build one intro/outro card clip at the selected canvas/30."""
     p=Path(entry['path']);reject_links(p)
     if not p.is_file():raise ValueError(f'render/{name}: source missing')
     if entry.get('sha256') and sha256(p)!=entry.get('sha256'):raise ValueError(f'render/{name}: source changed')
     kind=entry.get('kind');frames=max(1,round(float(entry.get('seconds') or 0)*30))
     dest=d/f'card_{name}.mp4'
     base=[str(config.ffmpeg),'-nostdin','-n','-v','error']
-    tail=['-vf',_card_filter(),'-r','30','-c:v','libx264','-preset','veryfast','-crf','20','-frames:v',str(frames),'-pix_fmt','yuv420p',str(dest)]
+    tail=['-vf',_card_filter(width,height),'-r','30','-c:v','libx264','-preset','veryfast','-crf','20','-frames:v',str(frames),'-pix_fmt','yuv420p',str(dest)]
     if kind=='image':
         cmd=base+['-loop','1','-i',str(p),'-t',f'{frames/30:.6f}']+tail
     elif kind=='video':
@@ -99,7 +99,7 @@ def _bind_voice_sources(job,jobdir):
 
 def render_video(job,config,jobdir,cancel=None,progress=None,_voice_binding=None,_return_beauty=False):
     """job snapshot has immutable lines, selected candidates and source fingerprints."""
-    d=Path(jobdir);s=job['settings'];lines=job['lines'];mapping=job['mapping'];voice=job.get('voices',[])
+    d=Path(jobdir);s=job['settings'];lines=job['lines'];mapping=job['mapping'];voice=job.get('voices',[]);W=int(s.get('width') or 1080);H=int(s.get('height') or 1920)
     highlights=job.get('highlights') or []
     manual_marks_only=str(s.get('highlight_source') or 'ai')=='manual'
     if len(mapping)!=len(lines) or (s['voice'] and len(voice)!=len(lines)):raise ValueError('render/count: sentence/mapping/voice mismatch')
@@ -112,7 +112,7 @@ def render_video(job,config,jobdir,cancel=None,progress=None,_voice_binding=None
     clips=[];timeline=[];total_frames=0;voice_wavs=[];beauty_reports=[]
     intro=s.get('intro');outro=s.get('outro')
     if intro:
-        card,intro_frames=_build_card(config,d,'intro',intro,cancel)
+        card,intro_frames=_build_card(config,d,'intro',intro,cancel,W,H)
         clips.append(card);total_frames+=intro_frames
     for i,(line,candidates) in enumerate(zip(lines,mapping)):
         if cancel and cancel():raise Cancelled('render/cancel')
@@ -135,7 +135,7 @@ def render_video(job,config,jobdir,cancel=None,progress=None,_voice_binding=None
             ass=f'cap_{i:03d}.ass'
             marks=highlights[i] if i<len(highlights) else ()
             highlight_on=bool(s.get('subtitle_highlight',True))
-            (d/ass).write_text(build_ass(line,s['subtitle_style'],size=s['subtitle_size'],bottom=s['subtitle_bottom'],marks=marks if highlight_on else (),auto=highlight_on and not manual_marks_only),encoding='utf8')
+            (d/ass).write_text(build_ass(line,s['subtitle_style'],size=s['subtitle_size'],bottom=s['subtitle_bottom'],width=W,height=H,marks=marks if highlight_on else (),auto=highlight_on and not manual_marks_only),encoding='utf8')
         remaining=frames;local=[];turn=0;chosen=[];cuts=[];sentence_start=total_frames/30
         picker=selector.new_sentence(candidates)
         while remaining>0:
@@ -146,7 +146,7 @@ def render_video(job,config,jobdir,cancel=None,progress=None,_voice_binding=None
             explicit_slice=bool(s.get('voice')) and s.get('sentence_gap_seconds') is not None and i<len(lines)-1
             pad_frames=(remaining-source_frames) if explicit_slice and 0<remaining-source_frames<=3 else 0
             nframes=source_frames+pad_frames;t=source_frames/30
-            dest=d/f'cut_{i:03d}_{turn:03d}.mp4';vf=_filter(s,None if s.get('beauty') else (str(cap) if cap else None),Path(config.font_path).name if cap and not s.get('beauty') else None,ass if (ass and not s.get('beauty')) else None)
+            dest=d/f'cut_{i:03d}_{turn:03d}.mp4';vf=_filter(s,None if s.get('beauty') else (str(cap) if cap else None),Path(config.font_path).name if cap and not s.get('beauty') else None,ass if (ass and not s.get('beauty')) else None,W,H)
             if pad_frames:vf+=f',tpad=stop_mode=clone:stop={pad_frames}'
             # Copy font to controlled ASCII basename, avoiding path escaping in filtergraph.
             if cap and not (d/Path(config.font_path).name).exists():shutil.copyfile(config.font_path,d/Path(config.font_path).name)
@@ -157,7 +157,7 @@ def render_video(job,config,jobdir,cancel=None,progress=None,_voice_binding=None
                 # through a local OpenCV ROI pass and then re-encodes H.264;
                 # subtitles are added only after the face pass below.
                 req=d/f'beauty-{i:03d}-{turn:03d}.json';raw=d/f'beauty-{i:03d}-{turn:03d}.mp4';rep=d/f'beauty-{i:03d}-{turn:03d}.report.json'
-                req.write_text(json.dumps({'source':str(dest),'output':str(raw),'report':str(rep),'strength':s.get('beauty_strength',.25),'fps':30,'width':1080,'height':1920,'expected_frames':nframes},ensure_ascii=False),encoding='utf8')
+                req.write_text(json.dumps({'source':str(dest),'output':str(raw),'report':str(rep),'strength':s.get('beauty_strength',.25),'fps':30,'width':W,'height':H,'expected_frames':nframes},ensure_ascii=False),encoding='utf8')
                 worker=Path(getattr(config,'project_src','.') or '.').absolute()/'workbench'/'beauty_worker.py'
                 _command([_filters_python(config),str(worker),str(req)],d,config.max_stage_seconds,cancel)
                 if not raw.is_file() or not rep.is_file():raise ValueError('render/beauty worker produced no output')
@@ -205,7 +205,7 @@ def render_video(job,config,jobdir,cancel=None,progress=None,_voice_binding=None
         timeline.append({'index':i,'start':start_time,'end':end_time,'voice_samples':len(vpcm) if wav else 0,'segments':[p.name for p in local],'sources':chosen,'cuts':cuts,'selection_warning':'candidate_shortage/cap_overrun' if shortage else None})
         if progress:progress(i+1,len(lines))
     if outro:
-        card,outro_frames=_build_card(config,d,'outro',outro,cancel)
+        card,outro_frames=_build_card(config,d,'outro',outro,cancel,W,H)
         clips.append(card);total_frames+=outro_frames
         # The trailing card belongs to the film's tail: fold it into the last
         # sentence interval so duration/QA contracts stay on one timeline.
@@ -285,7 +285,7 @@ def _encode_mux(config,draft,master,phase,attempt,cancel):
     final=attempt/'final.mp4';_command([config.ffmpeg,'-nostdin','-n','-v','error','-i',str(draft),'-itsoffset',str(-phase/24000),'-i',str(audio),'-map','0:v:0','-map','1:a:0','-c','copy','-movflags','+faststart',str(final)],attempt,config.max_stage_seconds,cancel)
     return final
 
-def encode_with_phase_retry(config,draft,master,timeline,voice_wavs,jobdir,mode,cancel=None,eos_receipts=None,source_receipts=None,frozen_voice_pcm=None,expected_engine='qwen',sentence_gap_seconds=None):
+def encode_with_phase_retry(config,draft,master,timeline,voice_wavs,jobdir,mode,cancel=None,eos_receipts=None,source_receipts=None,frozen_voice_pcm=None,expected_engine='qwen',sentence_gap_seconds=None,width=1080,height=1920):
     failures=[]
     for phase in PHASE_PREFIXES:
         if cancel and cancel():raise Cancelled('codec/cancel')
@@ -295,7 +295,7 @@ def encode_with_phase_retry(config,draft,master,timeline,voice_wavs,jobdir,mode,
                 _assert_voice_sources(voice_wavs,source_receipts)
             verify_kwargs={}
             if sentence_gap_seconds is not None:verify_kwargs['sentence_gap_seconds']=sentence_gap_seconds
-            report=verify_media(final,config.ffmpeg,config.ffprobe,timeline,master,voice_wavs,mode,cancel,config.max_stage_seconds,eos_receipts,frozen_voice_pcm=frozen_voice_pcm,expected_engine=expected_engine,**verify_kwargs)
+            report=verify_media(final,config.ffmpeg,config.ffprobe,timeline,master,voice_wavs,mode,cancel,config.max_stage_seconds,eos_receipts,frozen_voice_pcm=frozen_voice_pcm,expected_engine=expected_engine,width=width,height=height,**verify_kwargs)
             report['codec_phase_samples']=phase;report['codec_attempts']=len(failures)+1
             return final,report
         except VerificationFailure as e:
@@ -331,7 +331,7 @@ def _flower_windows(flower,timeline):
         rows.append((item['text'],item['style'],item.get('side') or 'right',start,end))
     return rows
 
-def _apply_flower(config,draft,flower,timeline,bottom,d,cancel):
+def _apply_flower(config,draft,flower,timeline,bottom,d,cancel,width=1080,height=1920):
     windows=_flower_windows(flower,timeline)
     if not windows:return draft
     total=round(timeline[-1]['end']*30)
@@ -347,14 +347,14 @@ def _apply_flower(config,draft,flower,timeline,bottom,d,cancel):
     prev='[0:v]'
     for n,(text,style,side,a,b) in enumerate(windows,start=1):
         w,h=sizes[n-1]
-        limit=int(1080*0.82) if style in ('glow_title','bottom_glow') else int(1080*0.44)
+        limit=int(width*0.82) if style in ('glow_title','bottom_glow') else int(width*0.44)
         if w>limit:
             ratio=limit/w;w=int(w*ratio);h=int(h*ratio)
         chains.append(f'[{n}:v]format=rgba,fade=t=in:st={a:.3f}:d=0.20:alpha=1,fade=t=out:st={max(a,b-0.18):.3f}:d=0.15:alpha=1,scale={w}:{h}[fl{n}]')
-        if style=='glow_title':x=(1080-w)//2;y=150
-        elif style=='bottom_glow':x=(1080-w)//2;y=max(200,1920-int(bottom)-h-70)
-        else:x=70 if side=='left' else 1080-w-70;y=760
-        y=max(60,min(y,1920-int(bottom)-h-20))
+        if style=='glow_title':x=(width-w)//2;y=int(height*0.08)
+        elif style=='bottom_glow':x=(width-w)//2;y=max(int(height*0.1),height-int(bottom)-h-70)
+        else:x=70 if side=='left' else width-w-70;y=int(height*0.40)
+        y=max(60,min(y,height-int(bottom)-h-20))
         chains.append(f"{prev}[fl{n}]overlay=x={x}:y={y}:enable='gte(t,{a:.3f})*lt(t,{b:.3f})'[fv{n}]")
         prev=f'[fv{n}]'
     out=d/'draft-flower.mp4'
@@ -363,18 +363,19 @@ def _apply_flower(config,draft,flower,timeline,bottom,d,cancel):
     if abs(_probe_duration(config.ffprobe,out)-timeline[-1]['end'])>1/30+.001:raise ValueError('render/flower duration mismatch')
     return out
 
-def _apply_stickers(config,draft,stickers,timeline,bottom,d,cancel):
+def _apply_stickers(config,draft,stickers,timeline,bottom,d,cancel,width=1080,height=1920):
     windows=_sticker_windows(stickers,timeline)
     if not windows:return draft
     assets=Path(__file__).parent/'assets'/'stickers'
+    size=round(width*0.16)
     total=round(timeline[-1]['end']*30)
     args=[config.ffmpeg,'-nostdin','-y','-v','error','-i',str(draft)]
     for icon,_,_,_ in windows:args+=['-loop','1','-i',str(assets/f'{icon}.png')]
-    chains=[f'[{n}:v]scale={STICKER_SIZE}:{STICKER_SIZE}:force_original_aspect_ratio=decrease[ic{n}]' for n in range(1,len(windows)+1)]
+    chains=[f'[{n}:v]scale={size}:{size}:force_original_aspect_ratio=decrease[ic{n}]' for n in range(1,len(windows)+1)]
     prev='[0:v]'
     for n,(icon,side,a,b) in enumerate(windows,start=1):
-        x=1080-STICKER_SIZE-60 if side=='right' else 60
-        y=max(40,1920-int(bottom)-STICKER_SIZE-30)
+        x=width-size-60 if side=='right' else 60
+        y=max(40,height-int(bottom)-size-30)
         chains.append(f"{prev}[ic{n}]overlay=x={x}:y={y}:enable='gte(t,{a:.3f})*lt(t,{b:.3f})'[v{n}]")
         prev=f'[v{n}]'
     out=d/'draft-stickers.mp4'
@@ -383,7 +384,7 @@ def _apply_stickers(config,draft,stickers,timeline,bottom,d,cancel):
     if abs(_probe_duration(config.ffprobe,out)-timeline[-1]['end'])>1/30+.001:raise ValueError('render/sticker duration mismatch')
     return out
 
-def _apply_brand(config,draft,settings,d,cancel):
+def _apply_brand(config,draft,settings,d,cancel,width=1080):
     logo=bool(settings.get('logo_enabled')) and str(settings.get('logo_path') or '')
     text=str(settings.get('watermark_text') or '').strip() if settings.get('watermark_enabled') else ''
     if not logo and not text:return draft
@@ -395,7 +396,7 @@ def _apply_brand(config,draft,settings,d,cancel):
         if not p.is_file():raise ValueError('render/logo: source missing')
         if settings.get('logo_sha256') and sha256(p)!=settings['logo_sha256']:raise ValueError('render/logo: source changed')
         args+=['-loop','1','-i',str(p)]
-        size=max(32,int(1080*float(settings.get('logo_scale',.16))))
+        size=max(32,int(width*float(settings.get('logo_scale',.16))))
         alpha=max(0.0,min(1.0,float(settings.get('logo_opacity',.9))))
         pos=settings.get('logo_pos','tr')
         x='48' if pos in ('tl','bl') else 'W-w-48'
@@ -447,18 +448,18 @@ def _mix_sfx(master,sfx,timeline,stickers):
     return out
 
 def render_job(job,config,jobdir,cancel=None,progress=None):
-    d=Path(jobdir);bound=_bind_voice_sources(job,d);draft,timeline,voice_master,wavs,beauty_reports=render_video(job,config,d,cancel,progress,_voice_binding=bound,_return_beauty=True);s=job['settings']
+    d=Path(jobdir);bound=_bind_voice_sources(job,d);draft,timeline,voice_master,wavs,beauty_reports=render_video(job,config,d,cancel,progress,_voice_binding=bound,_return_beauty=True);s=job['settings'];W=int(s.get('width') or 1080);H=int(s.get('height') or 1920)
     receipts=[v[1] for v in bound];frozen_pcm=tuple(v[2] for v in bound)
-    if job.get('stickers') and s.get('sticker_enabled',True):draft=_apply_stickers(config,draft,job['stickers'],timeline,s['subtitle_bottom'],d,cancel)
-    if job.get('flower') and s.get('flower_enabled',True):draft=_apply_flower(config,draft,job['flower'],timeline,s['subtitle_bottom'],d,cancel)
-    draft=_apply_brand(config,draft,s,d,cancel)
+    if job.get('stickers') and s.get('sticker_enabled',True):draft=_apply_stickers(config,draft,job['stickers'],timeline,s['subtitle_bottom'],d,cancel,W,H)
+    if job.get('flower') and s.get('flower_enabled',True):draft=_apply_flower(config,draft,job['flower'],timeline,s['subtitle_bottom'],d,cancel,W,H)
+    draft=_apply_brand(config,draft,s,d,cancel,W)
     sfx_on=bool(job.get('sfx')) and s.get('sfx_enabled',True)
     master=_mix_sfx(voice_master,job['sfx'],timeline,job.get('stickers')) if sfx_on else voice_master
     engine=s.get('voice_engine','qwen')
     gap_kw={} if s.get('sentence_gap_seconds') is None else {'sentence_gap_seconds':s.get('sentence_gap_seconds')}
     eos_receipts=[v.get('eos') for v in receipts] if s['voice'] else None
     if s['voice']:
-        intermediate,intermediate_report=encode_with_phase_retry(config,draft,voice_master,timeline,wavs,d/'voice-intermediate','voice',cancel,eos_receipts,receipts,frozen_pcm,engine,**gap_kw)
+        intermediate,intermediate_report=encode_with_phase_retry(config,draft,voice_master,timeline,wavs,d/'voice-intermediate','voice',cancel,eos_receipts,receipts,frozen_pcm,engine,**gap_kw,width=W,height=H)
         _assert_voice_sources(wavs,receipts)
         (d/'voice-intermediate-report.json').write_text(json.dumps(intermediate_report,ensure_ascii=False),encoding='utf8')
     mix_fit=None
@@ -488,8 +489,8 @@ def render_job(job,config,jobdir,cancel=None,progress=None):
         if s['voice']:mode='mixed' if sfx_on else 'voice'
         else:mode='bgm' if sfx_on else 'silent'
     if mode=='silent':
-        final=d/'final.mp4';shutil.copyfile(draft,final);report=verify_media(final,config.ffmpeg,config.ffprobe,timeline,None,None,'silent',cancel,config.max_stage_seconds)
-    else:final,report=encode_with_phase_retry(config,draft,master,timeline,wavs if s['voice'] else None,d/'final-codec',mode,cancel,eos_receipts,receipts if s['voice'] else None,frozen_pcm if s['voice'] else None,engine,**gap_kw)
+        final=d/'final.mp4';shutil.copyfile(draft,final);report=verify_media(final,config.ffmpeg,config.ffprobe,timeline,None,None,'silent',cancel,config.max_stage_seconds,width=W,height=H)
+    else:final,report=encode_with_phase_retry(config,draft,master,timeline,wavs if s['voice'] else None,d/'final-codec',mode,cancel,eos_receipts,receipts if s['voice'] else None,frozen_pcm if s['voice'] else None,engine,**gap_kw,width=W,height=H)
     if s['voice']:
         _assert_voice_sources(wavs,receipts)
     report['timeline']=timeline;report['source_index_id']=job['index_id'];report['input_sha256']=job['input_sha256'];report['voice_wav_sha256']=[v['sha256'] for v in receipts];report['bgm_sha256']=job.get('bgm_sha256');report['eos_receipts']=eos_receipts;report['voice_engine']=engine;report['voice_completion']='natural_stop' if s['voice'] else 'not_applicable'

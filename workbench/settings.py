@@ -60,7 +60,7 @@ class ProductionSettings:
         for k in ('beauty_strength','visual_filter_strength'):
             v=getattr(self,k)
             if type(v) not in (int,float) or not 0<=float(v)<=1:raise ValueError(f'{k}范围需为 0–1')
-        if (self.width,self.height,self.fps,self.codec)!=(1080,1920,30,'h264'):raise ValueError('输出规格固定为 1080x1920/30/H264')
+        if (self.width,self.height) not in ((1080,1920),(1920,1080)) or self.fps!=30 or self.codec!='h264':raise ValueError('输出规格需为 1080x1920 或 1920x1080 / 30fps / H264')
         if type(self.subtitle_size) is not int or not 24<=self.subtitle_size<=100:raise ValueError('subtitle_size 24..100')
         if type(self.subtitle_bottom) is not int or not 100<=self.subtitle_bottom<=800:raise ValueError('subtitle_bottom 100..800')
         if type(self.subtitle_border) is not int or not 0<=self.subtitle_border<=8:raise ValueError('subtitle_border 0..8')
