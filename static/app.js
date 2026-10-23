@@ -122,13 +122,21 @@ function rewriteState(){const pid=state.product?.id;if(!pid)return null;let x=st
 function rewriteReasonInput(){const pid=state.product?.id;if(!pid)return;const reason=String(($('#aiRewriteReason')||{}).value||'');if(reason.length>2000){($('#aiRewriteReason')||{}).value=reason.slice(0,2000);return}const x=state.rewriteByProduct[pid]||{productId:pid,source:($('#copy')||{}).value||state.draft||'',result:null,applied:false};x.reason=reason;state.rewriteByProduct[pid]=x;state.aiRewrite=x;state.rewriteGeneration++}
 function toggleAiRewritePanel(){state.aiRewriteOpen=!state.aiRewriteOpen;const p=$('#aiRewritePanel');if(p)p.hidden=!state.aiRewriteOpen}
 function renderRewritePreview(){const x=rewriteState(),box=$('#rewritePreview'),body=$('#aiRewritePreviewBody'),adopt=$('#btnRewriteAdopt'),undo=$('#btnRewriteUndo'),ta=$('#copy'),len=$('#rewriteLen');if(!box)return;if(!x||!x.result||x.invalid||!ta||(ta.value!==x.source&&ta.value!==x.result)){box.hidden=true;if(len)len.textContent='';return}box.hidden=false;if(body)body.textContent=x.result;if(len){const n=s=>String(s||'').replace(/\s+/g,'').length;len.textContent=`原稿 ${n(x.source)} 字 → 新稿 ${n(x.result)} 字`}if(adopt)adopt.disabled=!!x.applied;if(undo)undo.disabled=!x.applied}
+function setWbTab(name){
+  document.querySelectorAll('[data-wb-tab]').forEach(b=>b.classList.toggle('on',b.dataset.wbTab===name));
+  document.querySelectorAll('[data-wb-panel]').forEach(p=>{p.hidden=p.dataset.wbPanel!==name});
+}
+if(document.addEventListener)document.addEventListener('click',e=>{
+  const btn=e.target&&e.target.closest&&e.target.closest('[data-wb-tab]');
+  if(btn)setWbTab(btn.dataset.wbTab);
+});
 function renderScript(){const el=$('#secScript');if(!el)return;
-  if(!state.product){el.innerHTML='<h3><span class="num">2</span>脚本生产</h3><p class="muted">选择商品后可用。</p>';return}
+  if(!state.product){el.innerHTML='<h3><span class="num">2</span>脚本生产</h3><p class="muted">选择商品后可用。</p>';['secParams','secAdvanced','secBatch'].forEach(id=>{const n=document.getElementById(id);if(n)n.innerHTML=''});return}
   const s=productSettings();const engine=s.voice_engine||'qwen';const text=(state.draft!==''||state.draftProductId===state.product.id)?state.draft:(state.product.copy?.text||'');
   const coverName=state.cover?(state.cover.mode==='file'?(state.cover.name||String(state.cover.path||'').split(/[\\/]/).pop()):(state.cover.mode==='frame'?`第 ${state.cover.seconds} 秒`:'自动（第 1 秒）')):'';
   const introName=state.intro?(state.intro.name||String(state.intro.path||'').split(/[\\/]/).pop()):'';
   const outroName=state.outro?(state.outro.name||String(state.outro.path||'').split(/[\\/]/).pop()):'';
-  el.innerHTML=`<h3><span class="num">2</span>脚本生产 <small class="muted">${esc(state.product.name)}</small></h3>
+  const html=`<h3><span class="num">2</span>脚本生产 <small class="muted">${esc(state.product.name)}</small></h3>
 <label for="copy">口播文案 <span class="muted">（一行一句；多条脚本之间用单独一行 --- 分隔）</span></label>
 <textarea id="copy" rows="8" oninput="onCopyInput()">${esc(text)}</textarea>
 <div class="ai-row"><button class="secondary" id="btnAIGen" onclick="aiTogglePanel()">✨ AI 生成</button><button class="secondary" id="btnAIRewrite" onclick="toggleAiRewritePanel()" ${state.aiBusy?'disabled':''}>AI 洗文案</button><button class="secondary" id="btnAIPolish" onclick="aiRun('polish')">润色</button><button class="secondary" id="btnAIColloq" onclick="aiRun('colloquial')">改口语化</button><button class="secondary" id="btnAISplit" onclick="aiRun('split')">AI 断句</button><button class="secondary" id="btnAIFission" onclick="aiRun('variants')">AI 裂变 N 稿</button><button class="secondary" id="btnAIClean" onclick="cleanCopyLocal()">清理标点</button><button class="secondary" id="btnAIUndo" onclick="undoClean()" style="${state.cleanUndo===null?'display:none':''}">撤销清理</button><button class="secondary" id="btnAIPack" onclick="aiRun('pack')">投放包</button><button class="secondary" id="btnAIAudit" onclick="aiRun('audit')">合规体检</button><button class="secondary" id="btnAIFit" onclick="aiRun('fit')">按时长优化</button><span id="aiStatus" class="muted"></span></div>
@@ -165,6 +173,17 @@ function renderScript(){const el=$('#secScript');if(!el)return;
 <div class="row"><button class="secondary" onclick="saveCopy()">保存脚本</button><button class="secondary" onclick="previewRetrieval()">检索预览</button></div>
 <div id="retrieval" class="retrieval">${state.retrieval.map(x=>`<div><b>第${x.sentence_id+1}句</b> ${esc(x.line)}<br><small>${x.candidates.map(c=>esc(c.path.split(/[\\/]/).pop())+' '+Number(c.score).toFixed(3)).join(' · ')}</small></div>`).join('')}</div>
 </details>`;
+  const cutS=html.indexOf('<div class="settings-row">');
+  const cutEst=html.indexOf('<div class="estline">');
+  const cutAdv=html.indexOf('<details class="adv"><summary>高级设置');
+  const cutBatch=html.indexOf('<details class="adv"><summary>批量出片');
+  el.innerHTML=cutS>0?html.slice(0,cutS)+html.slice(cutEst,cutAdv):html;
+  const params=$('#secParams');
+  if(params)params.innerHTML=(cutS>0&&cutEst>cutS)?html.slice(cutS,cutEst):'';
+  const adv=$('#secAdvanced');
+  if(adv)adv.innerHTML=(cutAdv>0&&cutBatch>cutAdv)?html.slice(cutAdv,cutBatch):'';
+  const batchEl=$('#secBatch');
+  if(batchEl)batchEl.innerHTML=cutBatch>0?html.slice(cutBatch):'';
   renderBatchBox();renderCopyList();renderEstimate();syncSentenceGapUI();renderRewritePreview();aiBusySet(state.aiBusy,state.aiBusyMessage)}
 function syncSentenceGapUI(){const voice=$('#voice'),mode=$('#sentenceGapMode'),input=$('#sentenceGap');const muted=!!voice&&!voice.checked;const auto=!mode||mode.value==='auto';if(mode)mode.disabled=muted;if(input){input.disabled=muted||auto;if(auto)input.value=''}}
 function onVoiceToggle(){syncSentenceGapUI();timingChanged();persistSettings()}

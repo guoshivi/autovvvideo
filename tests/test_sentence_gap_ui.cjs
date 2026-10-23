@@ -8,7 +8,7 @@ const root=path.resolve(__dirname,'..');
 const source=fs.readFileSync(path.join(root,'static/app.js'),'utf8').split('/* ---------- init ---------- */')[0];
 
 function make(product, overrides={}){
-  const nodes={ '#secScript':{innerHTML:''}, '#copy':{value:'甲'}, '#voice':{checked:true}, '#subs':{checked:true},
+  const nodes={ '#secScript':{innerHTML:''}, '#secParams':{innerHTML:''}, '#secAdvanced':{innerHTML:''}, '#secBatch':{innerHTML:''}, '#copy':{value:'甲'}, '#voice':{checked:true}, '#subs':{checked:true},
     '#voiceEngine':{value:'qwen'}, '#voxVoice':{value:'natural_female'}, '#speaker':{value:'Serena'}, '#speed':{value:'1'},
     '#target':{value:''}, '#subSize':{value:'54'}, '#subPos':{value:'380'}, '#subBorder':{value:'3'}, '#shotReuse':{value:'1'},
     '#dedup':{value:'off'}, '#beauty':{checked:false}, '#beautyStrength':{value:'.25'}, '#visualFilter':{value:'original'},
@@ -20,16 +20,18 @@ function make(product, overrides={}){
   return {ctx,nodes};
 }
 
+function htmlOf(f){return ['#secScript','#secParams','#secAdvanced','#secBatch'].map(k=>f.nodes[k]?.innerHTML||'').join('\n')}
+
 test('sentence gap UI is explicit, adjacent to speed, and disabled with mute',()=>{
   const f=make({id:'a',name:'A',settings:{sentence_gap_seconds:null}});
   vm.runInContext('renderScript()',f.ctx);
-  assert.match(f.nodes['#secScript'].innerHTML,/句间停顿/);
-  assert.match(f.nodes['#secScript'].innerHTML,/sentenceGapMode/);
-  assert.match(f.nodes['#secScript'].innerHTML,/自动/);
+  assert.match(htmlOf(f),/句间停顿/);
+  assert.match(htmlOf(f),/sentenceGapMode/);
+  assert.match(htmlOf(f),/自动/);
   const muted=make({id:'a',name:'A',settings:{voice:false,sentence_gap_seconds:0.5}});
   vm.runInContext('renderScript()',muted.ctx);
-  assert.match(muted.nodes['#secScript'].innerHTML,/id="sentenceGapMode"[^>]*disabled/);
-  assert.match(muted.nodes['#secScript'].innerHTML,/id="sentenceGap"[^>]*disabled/);
+  assert.match(htmlOf(muted),/id="sentenceGapMode"[^>]*disabled/);
+  assert.match(htmlOf(muted),/id="sentenceGap"[^>]*disabled/);
 });
 
 test('auto remains null through unrelated save, while manual value persists',async()=>{

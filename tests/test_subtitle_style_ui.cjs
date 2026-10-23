@@ -17,6 +17,7 @@ function make(style) {
     '#beautyStrength': {value: '.25'}, '#visualFilter': {value: 'original'}, '#visualFilterStrength': {value: '.35'},
     '#sentenceGapMode': {value: 'auto'}, '#sentenceGap': {value: ''},
     '#hlOn': {checked: true}, '#stickerOn': {checked: true}, '#sfxOn': {checked: true}, '#flowerOn': {checked: true}, '#flowerStyle': {value: 'burst_red'}, '#flowerDensity': {value: 'max'},
+    '#secParams': {innerHTML: ''}, '#secAdvanced': {innerHTML: ''}, '#secBatch': {innerHTML: ''},
   };
   const ctx = vm.createContext({document: {querySelector: (s) => nodes[s] || null}, window: {}, console, setTimeout: (fn) => { fn(); return 0; }, clearTimeout, AbortController, fetch: () => { throw Error('unexpected fetch'); }});
   vm.runInContext(source, ctx);
@@ -25,10 +26,12 @@ function make(style) {
   return {ctx, nodes};
 }
 
+function htmlOf(f){return ['#secScript','#secParams','#secAdvanced','#secBatch'].map(k=>f.nodes[k]?.innerHTML||'').join('\n')}
+
 test('subtitle style picker exposes every advertised preset', () => {
   const f = make('classic');
   vm.runInContext('renderScript()', f.ctx);
-  const html = f.nodes['#secScript'].innerHTML;
+  const html = htmlOf(f);
   assert.match(html, /id="subStyle"/);
   for (const value of ['classic', 'neon', 'peach', 'mint', 'orange', 'minimal', 'legacy']) {
     assert.match(html, new RegExp(`value="${value}"`));
@@ -52,7 +55,7 @@ test('missing picker falls back to the product setting and never sends an invent
 test('highlight, sticker and sfx each have an on/off checkbox', () => {
   const f = make('classic');
   vm.runInContext('renderScript()', f.ctx);
-  const html = f.nodes['#secScript'].innerHTML;
+  const html = htmlOf(f);
   for (const id of ['hlOn', 'stickerOn', 'sfxOn']) assert.match(html, new RegExp(`id="${id}"`));
   assert.match(html, /重点词高亮/);
   assert.match(html, /贴图/);
@@ -73,8 +76,8 @@ test('unchecked switches are sent as false', () => {
 test('flower text has its own on/off checkbox and defaults on', () => {
   const f = make('classic');
   vm.runInContext('renderScript()', f.ctx);
-  assert.match(f.nodes['#secScript'].innerHTML, /id="flowerOn"/);
-  assert.match(f.nodes['#secScript'].innerHTML, /花字/);
+  assert.match(htmlOf(f), /id="flowerOn"/);
+  assert.match(htmlOf(f), /花字/);
   assert.equal(vm.runInContext('collectSettings().flower_enabled', f.ctx), true);
   f.nodes['#flowerOn'].checked = false;
   assert.equal(vm.runInContext('collectSettings().flower_enabled', f.ctx), false);
@@ -84,7 +87,7 @@ test('flower text has its own on/off checkbox and defaults on', () => {
 test('flower style picker lists auto plus every style and is sent through', () => {
   const f = make('classic');
   vm.runInContext('renderScript()', f.ctx);
-  const html = f.nodes['#secScript'].innerHTML;
+  const html = htmlOf(f);
   assert.match(html, /id="flowerStyle"/);
   for (const value of ['auto', 'burst_red', 'burst_orange', 'glow_title', 'bottom_glow', 'badge', 'tape', 'bubble', 'neon', 'brush', 'shadow3d']) {
     assert.match(html, new RegExp(`value="${value}"`));
@@ -96,7 +99,7 @@ test('flower style picker lists auto plus every style and is sent through', () =
 test('flower density picker offers four levels and is sent through', () => {
   const f = make('classic');
   vm.runInContext('renderScript()', f.ctx);
-  const html = f.nodes['#secScript'].innerHTML;
+  const html = htmlOf(f);
   assert.match(html, /id="flowerDensity"/);
   for (const value of ['low', 'normal', 'high', 'max']) assert.match(html, new RegExp(`value="${value}"`));
   assert.equal(vm.runInContext('collectSettings().flower_density', f.ctx), 'max');

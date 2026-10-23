@@ -5,15 +5,29 @@
   <div class="top-actions"><span class="muted">商品</span><select id="prodSel" aria-label="选择商品"><option value="">（未选择商品）</option></select><button id="btnArchive" class="secondary small" onclick="archiveProduct()" disabled>删除商品</button><input id="newName" placeholder="新商品名称" aria-label="新商品名称"><button class="primary" onclick="createProduct()">＋ 创建</button></div>
 </header>
 <div id="err" class="panel error" hidden></div>
-<main class="stack">
-  <div class="col">
+<main class="shell3">
+  <div class="col col-left">
     <section class="panel" id="secMaterials"></section>
     <section class="panel" id="secScript"></section>
   </div>
-  <div class="col">
+  <div class="col col-center">
+    <section class="wb-preview" id="wbPreview">
+      <div class="wb-preview-phone"><b>9:16</b><span>成片预览</span><small>生成后在这里播放；历史结果仍在下方</small></div>
+      <div class="wb-preview-meta" id="wbPreviewMeta">1080 × 1920 · 30fps</div>
+    </section>
     <section class="panel" id="secQueue"></section>
     <section class="panel" id="secResults"></section>
   </div>
+  <aside class="col col-right">
+    <nav class="wb-tabs" aria-label="参数分组">
+      <button type="button" data-wb-tab="params" class="on">参数</button>
+      <button type="button" data-wb-tab="advanced">高级</button>
+      <button type="button" data-wb-tab="batch">批量</button>
+    </nav>
+    <section class="panel wb-panel" id="secParams" data-wb-panel="params"></section>
+    <section class="panel wb-panel" id="secAdvanced" data-wb-panel="advanced" hidden></section>
+    <section class="panel wb-panel" id="secBatch" data-wb-panel="batch" hidden></section>
+  </aside>
 </main>
 <footer class="foot">素材只读使用；成片固定 1080×1920 / 30fps / H.264；文件夹在整台 Win 机（含 NAS 共享）内任选，也可直接粘贴路径；输出目录 / 商品名 / 年月日 / 商品名 序号.mp4；输出文件夹只保存视频，封面与质检报告留在工作台内。</footer>
 </div>
