@@ -7,6 +7,7 @@ from contextlib import ExitStack
 from .media import range_response,sha256
 from .browser import BrowserError
 from . import music, flower_text
+from .packaging import ICON_MEANINGS, SOUND_MEANINGS
 class WorkbenchHandler(BaseHTTPRequestHandler):
     server_version='Workbench/2.0'
     def log_message(self,*args):return
@@ -159,6 +160,16 @@ class WorkbenchHandler(BaseHTTPRequestHandler):
                     roots.append({'id':i,'name':tail,'path':str(r)})
                 return self._json(roots)
             if u.path=='/api/ai-settings':return self._json(svc.ai_settings())
+            if u.path=='/api/stickers':
+                self._json([{'id':k,'meaning':v} for k,v in ICON_MEANINGS.items()]);return
+            if u.path=='/api/sounds':
+                self._json([{'id':k,'meaning':v} for k,v in SOUND_MEANINGS.items()]);return
+            if u.path.startswith('/api/sticker/'):
+                name=u.path.rsplit('/',1)[-1]
+                if not name.endswith('.png') or '/' in name or '\\' in name:self.send_error(404);return
+                f=Path(__file__).resolve().parent/'assets'/'stickers'/name
+                if not f.exists():self.send_error(404);return
+                raw=f.read_bytes();self.send_response(200);self.send_header('Content-Type','image/png');self.send_header('Cache-Control','public, max-age=86400');self.send_header('Content-Length',str(len(raw)));self.end_headers();self.wfile.write(raw);return
             if u.path.startswith('/api/flower-preview/'):
                 style=u.path.rsplit('/',1)[-1]
                 if style not in flower_text.STYLES:self.send_error(404);return

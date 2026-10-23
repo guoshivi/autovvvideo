@@ -19,6 +19,8 @@ STYLES = (
     'burst_red', 'burst_orange', 'glow_title', 'bottom_glow', 'badge',
     'tape', 'bubble', 'neon', 'brush', 'shadow3d',
     'ribbon_badge', 'pendant_tag', 'seal', 'frame_gold',
+    'kuaile_pop', 'masha_ink', 'longcang_script', 'qingke_banner',
+    'gradient_fill', 'outline_glow',
 )
 
 STYLE_MEANINGS = {
@@ -36,7 +38,30 @@ STYLE_MEANINGS = {
     'pendant_tag': '吊牌挂坠，价格/标签',
     'seal': '圆形印章，认证/盖章',
     'frame_gold': '金色画框，高级/礼盒',
+    'kuaile_pop': '快乐体弹出，活泼/年轻',
+    'masha_ink': '毛笔手写，国货/文化感',
+    'longcang_script': '龙藏手写，手作/温度',
+    'qingke_banner': '黄油粗体横幅，促销/醒目',
+    'gradient_fill': '渐变填充，潮流/美妆',
+    'outline_glow': '空心描边，科技/高级',
 }
+
+STYLE_FONTS = {
+    'kuaile_pop': 'ZCOOLKuaiLe-Regular.ttf',
+    'masha_ink': 'MaShanZheng-Regular.ttf',
+    'longcang_script': 'LongCang-Regular.ttf',
+    'qingke_banner': 'ZCOOLQingKeHuangYou-Regular.ttf',
+}
+_FONT_DIR = Path(__file__).resolve().parent / 'assets' / 'fonts'
+
+
+def _style_font(style: str, font_path: str | None) -> str | None:
+    name = STYLE_FONTS.get(style)
+    if name:
+        p = _FONT_DIR / name
+        if p.exists():
+            return str(p)
+    return font_path
 
 _FONT_CANDIDATES = (
     'C:/Windows/Fonts/msyhbd.ttc',
@@ -124,6 +149,7 @@ def render(text: str, style: str, font_path: str | None = None, scale: float = 1
     if any(unicodedata.category(ch).startswith('P') or ch == '～' for ch in text):
         raise ValueError('花字不能带标点')
 
+    font_path = _style_font(style, font_path)
     angle = _angle(text, style)
     if style in ('burst_red', 'burst_orange'):
         size = int(440 * scale)
@@ -195,6 +221,72 @@ def render(text: str, style: str, font_path: str | None = None, scale: float = 1
         d.polygon([(w * 0.28, h - int(28 * scale)), (w * 0.40, h - int(28 * scale)), (w * 0.32, h - 4)], fill=(255, 255, 255, 245), outline=(20, 20, 20, 255))
         canvas.alpha_composite(txt, ((w - txt.width) // 2, (h - int(26 * scale) - txt.height) // 2 + 4))
         return _rotated(canvas, angle)
+
+    if style == 'kuaile_pop':
+        txt = _text_layer(text, int(80 * scale), int(9 * scale), font_path=font_path)
+        shadow = _text_layer(text, int(80 * scale), int(9 * scale), fill=(255, 205, 40, 255), stroke_fill=(120, 72, 0, 255), font_path=font_path)
+        canvas = Image.new('RGBA', (txt.width + int(40 * scale), txt.height + int(40 * scale)), (0, 0, 0, 0))
+        off = max(5, int(12 * scale))
+        canvas.alpha_composite(shadow, (20 + off, 20 + off))
+        canvas.alpha_composite(txt, (20, 20))
+        return _rotated(canvas, angle * 0.7)
+
+    if style == 'masha_ink':
+        txt = _text_layer(text, int(86 * scale), int(5 * scale), fill=(28, 24, 20, 255), stroke_fill=(255, 250, 238, 255), font_path=font_path)
+        canvas = Image.new('RGBA', (txt.width + int(70 * scale), txt.height + int(60 * scale)), (0, 0, 0, 0))
+        canvas.alpha_composite(txt, (int(18 * scale), int(8 * scale)))
+        d = ImageDraw.Draw(canvas)
+        y = canvas.height - int(20 * scale)
+        d.line([(int(24 * scale), y), (canvas.width - int(24 * scale), y)], fill=(190, 38, 34, 220), width=max(4, int(8 * scale)))
+        seal = int(46 * scale)
+        x0, y0 = canvas.width - seal - int(8 * scale), int(8 * scale)
+        d.rounded_rectangle([x0, y0, x0 + seal, y0 + seal], radius=int(6 * scale), fill=(190, 38, 34, 235))
+        sf = _font(max(14, int(24 * scale)), font_path)
+        bb = d.textbbox((0, 0), '印', font=sf)
+        d.text((x0 + (seal - (bb[2]-bb[0])) // 2 - bb[0], y0 + (seal - (bb[3]-bb[1])) // 2 - bb[1]), '印', font=sf, fill=(255, 245, 230, 255))
+        return _rotated(canvas, angle * 0.4)
+
+    if style == 'longcang_script':
+        txt = _text_layer(text, int(88 * scale), int(6 * scale), fill=(255, 255, 255, 255), stroke_fill=(120, 20, 70, 255), font_path=font_path)
+        glow = txt.filter(ImageFilter.GaussianBlur(int(9 * scale)))
+        tint = Image.new('RGBA', glow.size, (255, 90, 160, 255))
+        tint.putalpha(glow.getchannel('A').point(lambda v: int(v * 0.65)))
+        canvas = Image.new('RGBA', (txt.width + 50, txt.height + 50), (0, 0, 0, 0))
+        canvas.alpha_composite(tint, (25, 25)); canvas.alpha_composite(txt, (25, 25))
+        return _rotated(canvas, angle * 0.45)
+
+    if style == 'qingke_banner':
+        txt = _text_layer(text, int(66 * scale), int(4 * scale), fill=(25, 20, 10, 255), stroke_fill=(255, 225, 90, 255), font_path=font_path, pad=int(42 * scale))
+        w, h = txt.width + int(40 * scale), txt.height + int(34 * scale)
+        canvas = Image.new('RGBA', (w, h), (0, 0, 0, 0)); d = ImageDraw.Draw(canvas)
+        d.rounded_rectangle([int(4*scale), int(4*scale), w-int(4*scale), h-int(4*scale)], radius=int(14*scale), fill=(255, 205, 40, 245), outline=(35, 28, 12, 255), width=max(3, int(5*scale)))
+        canvas.alpha_composite(txt, ((w - txt.width)//2, (h - txt.height)//2))
+        return _rotated(canvas, angle * 0.25)
+
+    if style == 'gradient_fill':
+        size = int(86 * scale); stroke = max(4, int(8 * scale))
+        outline = _text_layer(text, size, stroke, fill=(0, 0, 0, 0), stroke_fill=(35, 25, 35, 255), font_path=font_path)
+        fillmask = _text_layer(text, size, 0, fill=(255, 255, 255, 255), stroke_fill=(0, 0, 0, 0), font_path=font_path)
+        w, h = outline.size
+        grad = Image.new('RGBA', (w, h), (0, 0, 0, 0)); px = grad.load()
+        for yy in range(h):
+            t = yy / max(1, h - 1)
+            r = 255; g = int(70 * (1 - t) + 210 * t); b = int(120 * (1 - t) + 80 * t)
+            for xx in range(w): px[xx, yy] = (r, g, b, 255)
+        mask = Image.new('L', (w, h), 0)
+        mask.paste(fillmask.getchannel('A'), ((w - fillmask.width) // 2, (h - fillmask.height) // 2))
+        grad.putalpha(mask)
+        canvas = Image.new('RGBA', (w + 24, h + 24), (0, 0, 0, 0))
+        canvas.alpha_composite(grad, (12, 12)); canvas.alpha_composite(outline, (12, 12))
+        return _rotated(canvas, angle * 0.4)
+
+    if style == 'outline_glow':
+        txt = _text_layer(text, int(82 * scale), int(9 * scale), fill=(0, 0, 0, 0), stroke_fill=(255, 255, 255, 255), font_path=font_path)
+        glow = txt.filter(ImageFilter.GaussianBlur(int(12 * scale)))
+        tint = Image.new('RGBA', glow.size, (80, 220, 255, 255)); tint.putalpha(glow.getchannel('A'))
+        canvas = Image.new('RGBA', (txt.width + 60, txt.height + 60), (0, 0, 0, 0))
+        canvas.alpha_composite(tint, (30, 30)); canvas.alpha_composite(txt, (30, 30))
+        return _rotated(canvas, angle * 0.5)
 
     if style == 'neon':
         txt = _text_layer(text, int(66 * scale), int(8 * scale), fill=(255, 255, 255, 255), stroke_fill=(20, 0, 30, 255), font_path=font_path)

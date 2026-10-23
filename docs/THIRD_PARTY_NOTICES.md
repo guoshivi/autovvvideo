@@ -59,3 +59,17 @@
 - **numpy 2.1.3**：BSD-3-Clause；与 filters 环境配对，不替换工作台既有 embedding/TTS 环境。
 
 本项目没有引入 MediaPipe、CodeFormer 或 GFPGAN；GitHub 高星项目仅作为选型和许可证参考。
+
+
+## 2026-10-23 asset expansion
+
+- Stickers: Microsoft Fluent Emoji 3D, MIT. 96 additional PNGs copied from
+  `microsoft/fluentui-emoji` (assets/<name>/3D, or Default/3D for skin-tone
+  variants). Total 132.
+- Display fonts: Google Fonts, SIL Open Font License 1.1:
+  ZCOOL KuaiLe, Ma Shan Zheng, Long Cang, ZCOOL QingKe HuangYou.
+  Files in `workbench/assets/fonts/`, attribution in its LICENSE.md.
+- SFX: Kenney UI sounds and jingle hits (CC0), repo `iwenzhou/kenney`;
+  converted to 24 kHz mono WAV. Total 46.
+- Music: four additional instrumental beds synthesized locally
+  (`bright/luxury/playful/epic`), no third-party samples. Total 9.

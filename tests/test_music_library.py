@@ -20,11 +20,11 @@ def test_unknown_speaker_is_rejected():
         ProductionSettings.from_dict({"speaker": "Cherry"}).validate()
 
 
-def test_music_library_lists_five_tracks_with_unique_ids():
+def test_music_library_lists_tracks_with_unique_ids():
     rows = list_tracks()
-    assert len(rows) == 5
-    assert len({r["id"] for r in rows}) == 5
-    assert {r["mood"] for r in rows} == {"兴奋", "愉悦", "平静", "悲伤", "动感"}
+    assert len(rows) >= 5
+    assert len({r["id"] for r in rows}) == len(rows)
+    assert {"兴奋", "愉悦", "平静", "悲伤", "动感"} <= {r["mood"] for r in rows}
     for row in rows:
         p = Path(row["path"])
         assert p.is_file() and p.stat().st_size > 100_000

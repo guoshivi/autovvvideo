@@ -18,7 +18,7 @@ def test_sticker_density_is_capped_and_lines_are_unique():
 
 
 def test_unknown_icon_or_line_is_dropped():
-    data = {'stickers': [{'line': 99, 'icon': 'check'}, {'line': 1, 'icon': 'rocket'}, {'line': 2, 'icon': 'box'}]}
+    data = {'stickers': [{'line': 99, 'icon': 'check'}, {'line': 1, 'icon': 'not_a_real_icon'}, {'line': 2, 'icon': 'box'}]}
     assert [s['line'] for s in packaging.validate(lines(4), data)['stickers']] == [2]
 
 

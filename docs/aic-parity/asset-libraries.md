@@ -39,3 +39,12 @@
 - Fluent Emoji 继续扩到 60–80 个常用语义（脸、手势、工具、天气），只改 `ICON_MEANINGS` + 资产 + 一致性测试。
 - 用 `google/fonts` 的 OFL 字体（站酷快乐体、马善政、龙藏）做字体型花字，需附 OFL 许可。
 - 若要多帧 Lottie 动效，先在独立渲染器里把 Lottie 转 PNG 序列，逐条记录动画许可；不要直接塞进现有 ffmpeg 链。
+
+
+## 本轮扩容（2026-10-23）
+
+- 贴纸：Fluent Emoji 3D 追加 96 个，总计 132；字典 `ICON_MEANINGS` 全部有对应 PNG。
+- 花字：新增 6 个样式（快乐体、毛笔、龙藏、黄油横幅、渐变、空心），字体来自 Google Fonts OFL；总计 20。
+- 音效：Kenney UI/jingle 追加 19 个，总计 46。
+- 音乐：本机合成追加 4 首，总计 9。
+- 所有菜单项由 `tests/test_asset_menus.py` 校验“有菜单必有文件”。
