@@ -350,7 +350,7 @@ def _apply_flower(config,draft,flower,timeline,bottom,d,cancel):
         limit=int(1080*0.82) if style in ('glow_title','bottom_glow') else int(1080*0.44)
         if w>limit:
             ratio=limit/w;w=int(w*ratio);h=int(h*ratio)
-        chains.append(f'[{n}:v]scale={w}:{h}[fl{n}]')
+        chains.append(f'[{n}:v]format=rgba,fade=t=in:st={a:.3f}:d=0.20:alpha=1,fade=t=out:st={max(a,b-0.18):.3f}:d=0.15:alpha=1,scale={w}:{h}[fl{n}]')
         if style=='glow_title':x=(1080-w)//2;y=150
         elif style=='bottom_glow':x=(1080-w)//2;y=max(200,1920-int(bottom)-h-70)
         else:x=70 if side=='left' else 1080-w-70;y=760
@@ -381,6 +381,40 @@ def _apply_stickers(config,draft,stickers,timeline,bottom,d,cancel):
     args+=['-filter_complex',';'.join(chains),'-map',prev,'-an','-c:v','libx264','-preset','veryfast','-crf','18','-r','30','-frames:v',str(total),'-pix_fmt','yuv420p',str(out)]
     _command(args,d,config.max_stage_seconds,cancel)
     if abs(_probe_duration(config.ffprobe,out)-timeline[-1]['end'])>1/30+.001:raise ValueError('render/sticker duration mismatch')
+    return out
+
+def _apply_brand(config,draft,settings,d,cancel):
+    logo=bool(settings.get('logo_enabled')) and str(settings.get('logo_path') or '')
+    text=str(settings.get('watermark_text') or '').strip() if settings.get('watermark_enabled') else ''
+    if not logo and not text:return draft
+    total=round(_probe_duration(config.ffprobe,draft)*30)
+    args=[config.ffmpeg,'-nostdin','-y','-v','error','-i',str(draft)]
+    chains=[];prev='0:v'
+    if logo:
+        p=Path(settings['logo_path']);reject_links(p)
+        if not p.is_file():raise ValueError('render/logo: source missing')
+        if settings.get('logo_sha256') and sha256(p)!=settings['logo_sha256']:raise ValueError('render/logo: source changed')
+        args+=['-loop','1','-i',str(p)]
+        size=max(32,int(1080*float(settings.get('logo_scale',.16))))
+        alpha=max(0.0,min(1.0,float(settings.get('logo_opacity',.9))))
+        pos=settings.get('logo_pos','tr')
+        x='48' if pos in ('tl','bl') else 'W-w-48'
+        y='48' if pos in ('tl','tr') else 'H-h-48'
+        chains.append(f'[1:v]format=rgba,scale={size}:-1,colorchannelmixer=aa={alpha:.3f}[lg]')
+        chains.append(f'[{prev}][lg]overlay={x}:{y}:format=auto[v1]');prev='v1'
+    if text:
+        body=d/'watermark.txt';body.write_text(text,encoding='utf8')
+        font=str(getattr(config,'font_path','') or '').replace(chr(92),'/')
+        font=font.replace(':',chr(92)+':')
+        size=int(settings.get('watermark_size',36));alpha=max(0.0,min(1.0,float(settings.get('watermark_opacity',.6))))
+        pos=settings.get('watermark_pos','br')
+        x='48' if pos in ('tl','bl') else 'w-tw-48'
+        y='48' if pos in ('tl','tr') else 'h-th-48'
+        chains.append(f"[{prev}]drawtext=fontfile='{font}':textfile='watermark.txt':fontcolor=white@{alpha:.3f}:fontsize={size}:x={x}:y={y}:shadowcolor=black@0.45:shadowx=2:shadowy=2[v2]");prev='v2'
+    out=d/'draft-brand.mp4'
+    args+=['-filter_complex',';'.join(chains),'-map',f'[{prev}]','-an','-c:v','libx264','-preset','veryfast','-crf','18','-r','30','-frames:v',str(total),'-pix_fmt','yuv420p',str(out)]
+    _command(args,d,config.max_stage_seconds,cancel)
+    if abs(_probe_duration(config.ffprobe,out)-_probe_duration(config.ffprobe,draft))>1/30+.001:raise ValueError('render/brand duration mismatch')
     return out
 
 def _mix_sfx(master,sfx,timeline,stickers):
@@ -417,6 +451,7 @@ def render_job(job,config,jobdir,cancel=None,progress=None):
     receipts=[v[1] for v in bound];frozen_pcm=tuple(v[2] for v in bound)
     if job.get('stickers') and s.get('sticker_enabled',True):draft=_apply_stickers(config,draft,job['stickers'],timeline,s['subtitle_bottom'],d,cancel)
     if job.get('flower') and s.get('flower_enabled',True):draft=_apply_flower(config,draft,job['flower'],timeline,s['subtitle_bottom'],d,cancel)
+    draft=_apply_brand(config,draft,s,d,cancel)
     sfx_on=bool(job.get('sfx')) and s.get('sfx_enabled',True)
     master=_mix_sfx(voice_master,job['sfx'],timeline,job.get('stickers')) if sfx_on else voice_master
     engine=s.get('voice_engine','qwen')

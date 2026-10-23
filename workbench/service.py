@@ -412,6 +412,12 @@ class WorkbenchService:
             if not bgm.is_file() or bgm.suffix.lower() not in AUDIO_EXT:raise ServiceError('BGM 文件不可用，请重新选择')
             bgm_sha=sha256(bgm)
         else:bgm_sha=None
+        if setting.get('logo_enabled'):
+            logo=Path(setting['logo_path']);reject_links(logo)
+            if not logo.is_file():raise ServiceError('Logo 图片不可用，请重新上传')
+            digest=sha256(logo)
+            if setting.get('logo_sha256') and digest!=setting['logo_sha256']:raise ServiceError('Logo 图片已变化，请重新上传')
+            setting['logo_sha256']=digest
         for key,label in (('intro','片头'),('outro','片尾')):
             if setting.get(key):setting[key]=self._bind_media(setting[key],label,need_kind=True)
         if setting.get('cover') and setting['cover'].get('mode')=='file':
@@ -719,6 +725,21 @@ class WorkbenchService:
         if not ok:raise ServiceError('封面图内容与格式不符，请重新选择')
         digest=hashlib.sha256(raw).hexdigest()
         folder=Path(self.cfg.data_root)/'covers';folder.mkdir(parents=True,exist_ok=True)
+        dest=folder/(digest[:16]+self._COVER_TYPES[ct])
+        if not dest.exists():
+            tmp=folder/(digest[:16]+'.tmp');tmp.write_bytes(raw);os.replace(tmp,dest)
+        return {'name':dest.name,'path':str(dest),'sha256':digest,'bytes':len(raw)}
+    def save_overlay_file(self,pid,raw,content_type):
+        p=self.store.get_product(pid)
+        if p['archived']:raise ServiceError('archived product')
+        ct=str(content_type or '').lower()
+        if ct not in self._COVER_TYPES:raise ServiceError('图片请用 JPG / PNG / WebP 格式')
+        if not raw or len(raw)>12*1024*1024:raise ServiceError('图片需小于 12MB')
+        head=raw[:16]
+        ok=((ct=='image/jpeg' and head[:3]==b'\xff\xd8\xff') or (ct=='image/png' and head[:8]==b'\x89PNG\r\n\x1a\n') or (ct=='image/webp' and head[:4]==b'RIFF' and raw[8:12]==b'WEBP'))
+        if not ok:raise ServiceError('图片内容与格式不符，请重新选择')
+        digest=hashlib.sha256(raw).hexdigest()
+        folder=Path(self.cfg.data_root)/'overlays';folder.mkdir(parents=True,exist_ok=True)
         dest=folder/(digest[:16]+self._COVER_TYPES[ct])
         if not dest.exists():
             tmp=folder/(digest[:16]+'.tmp');tmp.write_bytes(raw);os.replace(tmp,dest)

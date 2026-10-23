@@ -43,7 +43,7 @@ def _check_cover(v):
 
 @dataclass(frozen=True)
 class ProductionSettings:
-    voice:bool=False;speaker:str='Serena';voice_engine:str='qwen';vox_voice:str='natural_female';subtitles:bool=True;subtitle_size:int=54;subtitle_bottom:int=380;subtitle_border:int=3;subtitle_style:str='classic';highlight_source:str='ai';subtitle_highlight:bool=True;sticker_enabled:bool=True;sfx_enabled:bool=True;flower_enabled:bool=True;flower_style:str='auto';flower_density:str='high';bgm:bool=False;bgm_path:str='';bgm_volume:float=0.20;dedup:str='off';beauty:bool=False;beauty_strength:float=0.25;visual_filter:str='original';visual_filter_strength:float=0.35;speed:float=1.0;sentence_gap_seconds:Optional[float]=None;target_seconds:int=0;shot_reuse:int=1;cover:Optional[dict]=None;intro:Optional[dict]=None;outro:Optional[dict]=None;width:int=1080;height:int=1920;fps:int=30;codec:str='h264'
+    voice:bool=False;speaker:str='Serena';voice_engine:str='qwen';vox_voice:str='natural_female';subtitles:bool=True;subtitle_size:int=54;subtitle_bottom:int=380;subtitle_border:int=3;subtitle_style:str='classic';highlight_source:str='ai';subtitle_highlight:bool=True;sticker_enabled:bool=True;sfx_enabled:bool=True;flower_enabled:bool=True;flower_style:str='auto';flower_density:str='high';bgm:bool=False;bgm_path:str='';bgm_volume:float=0.20;dedup:str='off';beauty:bool=False;beauty_strength:float=0.25;visual_filter:str='original';visual_filter_strength:float=0.35;speed:float=1.0;sentence_gap_seconds:Optional[float]=None;target_seconds:int=0;shot_reuse:int=1;cover:Optional[dict]=None;intro:Optional[dict]=None;outro:Optional[dict]=None;width:int=1080;height:int=1920;fps:int=30;codec:str='h264';logo_enabled:bool=False;logo_path:str='';logo_sha256:str='';logo_pos:str='tr';logo_scale:float=0.16;logo_opacity:float=0.9;watermark_enabled:bool=False;watermark_text:str='';watermark_pos:str='br';watermark_size:int=36;watermark_opacity:float=0.6
     @classmethod
     def from_dict(cls,d):
         if set(d)-set(cls.__dataclass_fields__):raise ValueError('unknown production setting')
@@ -79,6 +79,22 @@ class ProductionSettings:
                 raise ValueError('句间停顿需为 0.10–1.00 秒的有限数字')
         if type(self.target_seconds) is not int or not 0<=self.target_seconds<=3600:raise ValueError('目标时长需为 0–3600 秒的整数（0 表示不设）')
         if type(self.shot_reuse) is not int or self.shot_reuse not in (0,1,2,3):raise ValueError('镜头重复上限需为 0/1/2/3（0 表示不限）')
+        for k in ('logo_enabled','watermark_enabled'):
+            if type(getattr(self,k)) is not bool:raise ValueError(f'{k} must be boolean')
+        if self.logo_enabled:
+            if not isinstance(self.logo_path,str) or not self.logo_path or not Path(self.logo_path).is_file():raise ValueError('Logo 图片不存在')
+            if Path(self.logo_path).suffix.lower() not in ('.png','.jpg','.jpeg','.webp'):raise ValueError('Logo 需为 PNG/JPG/WebP')
+        if self.logo_sha256 and (not isinstance(self.logo_sha256,str) or len(self.logo_sha256)!=64):raise ValueError('Logo 指纹无效')
+        if self.logo_pos not in ('tl','tr','bl','br'):raise ValueError('Logo 位置需为 tl/tr/bl/br')
+        for k in ('logo_scale','logo_opacity'):
+            v=getattr(self,k)
+            if type(v) not in (int,float) or not 0<=float(v)<=1:raise ValueError(f'{k}范围需为 0–1')
+        if not 0.05<=float(self.logo_scale)<=0.40:raise ValueError('Logo 大小需在 5%–40%')
+        if not isinstance(self.watermark_text,str) or len(self.watermark_text)>40 or any(ord(c)<32 for c in self.watermark_text):raise ValueError('水印文字最多 40 字且不能含控制字符')
+        if self.watermark_enabled and not self.watermark_text.strip():raise ValueError('启用水印时需填写文字')
+        if self.watermark_pos not in ('tl','tr','bl','br'):raise ValueError('水印位置需为 tl/tr/bl/br')
+        if type(self.watermark_size) is not int or not 18<=self.watermark_size<=96:raise ValueError('水印字号需在 18–96')
+        if type(self.watermark_opacity) not in (int,float) or not 0<=float(self.watermark_opacity)<=1:raise ValueError('水印透明度需在 0–1')
         if self.cover is not None:_check_cover(self.cover)
         if self.intro is not None:_check_card(self.intro,'片头')
         if self.outro is not None:_check_card(self.outro,'片尾')

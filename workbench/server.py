@@ -268,6 +268,9 @@ class WorkbenchHandler(BaseHTTPRequestHandler):
             if u.path.startswith('/api/products/') and u.path.endswith('/cover-file'):
                 parts=u.path.strip('/').split('/');pid=parts[2] if len(parts)>2 else ''
                 return self._json(svc.save_cover_file(pid,self._raw_body(12*1024*1024),self.headers.get_content_type()))
+            if u.path.startswith('/api/products/') and u.path.endswith('/overlay-file'):
+                parts=u.path.strip('/').split('/');pid=parts[2] if len(parts)>2 else ''
+                return self._json(svc.save_overlay_file(pid,self._raw_body(12*1024*1024),self.headers.get_content_type()))
             body=self._body()
             if time.monotonic() >= getattr(self,'_request_deadline',0): raise ValueError('body total deadline exceeded')
             if u.path=='/api/products':return self._json(svc.create_product(body.get('name','')),201)

@@ -36,11 +36,11 @@ async function load(){try{setErr('');if(state.draftProductId==null||state.draftP
   state.needReload=false;
 }catch(e){state.needReload=true;setErr('服务暂不可用：'+e.message+'（稍等片刻会自动恢复）')}}
 /* ---------- 设置：读取/保存（记住上次选择） ---------- */
-const DEFAULTS={voice:true,subtitles:true,speaker:'Serena',voice_engine:'qwen',vox_voice:'natural_female',speed:1.0,sentence_gap_seconds:null,target_seconds:0,shot_reuse:1,subtitle_size:54,subtitle_bottom:380,subtitle_border:3,subtitle_style:'classic',highlight_source:'ai',subtitle_highlight:true,sticker_enabled:true,sfx_enabled:true,flower_enabled:true,flower_style:'auto',flower_density:'high',dedup:'off',beauty:false,beauty_strength:0.25,visual_filter:'original',visual_filter_strength:0.35,bgm:false,bgm_path:'',bgm_volume:0.2,cover:null,intro:null,outro:null};
+const DEFAULTS={voice:true,subtitles:true,speaker:'Serena',voice_engine:'qwen',vox_voice:'natural_female',speed:1.0,sentence_gap_seconds:null,target_seconds:0,shot_reuse:1,subtitle_size:54,subtitle_bottom:380,subtitle_border:3,subtitle_style:'classic',highlight_source:'ai',subtitle_highlight:true,sticker_enabled:true,sfx_enabled:true,flower_enabled:true,flower_style:'auto',flower_density:'high',dedup:'off',beauty:false,beauty_strength:0.25,visual_filter:'original',visual_filter_strength:0.35,bgm:false,bgm_path:'',bgm_volume:0.2,cover:null,intro:null,outro:null,logo_enabled:false,logo_path:'',logo_sha256:'',logo_pos:'tr',logo_scale:0.16,logo_opacity:0.9,watermark_enabled:false,watermark_text:'',watermark_pos:'br',watermark_size:36,watermark_opacity:0.6};
 function productSettings(){return Object.assign({},DEFAULTS,state.product&&state.product.settings||{})}
 function hydrateSettings(){if(state.product&&state.settingsTimers&&state.settingsTimers[state.product.id])return;
   const s=productSettings();
-  if(!state.cover&&s.cover)state.cover=s.cover;if(!state.intro&&s.intro)state.intro=s.intro;if(!state.outro&&s.outro)state.outro=s.outro;state.bgm=null}
+  if(!state.cover&&s.cover)state.cover=s.cover;if(!state.intro&&s.intro)state.intro=s.intro;if(!state.outro&&s.outro)state.outro=s.outro;state.bgm=null;state.logo=s.logo_path?{path:s.logo_path,sha256:s.logo_sha256||'',name:String(s.logo_path).split(/[\\/]/).pop()}:null}
 function collectSettings(){const s=productSettings();
   const num=v=>Number(v)||0;
   const gapMode=$('#sentenceGapMode'),gapInput=$('#sentenceGap');
@@ -71,6 +71,16 @@ function collectSettings(){const s=productSettings();
     dedup:$('#dedup')?$('#dedup').value:s.dedup,
     beauty:$('#beauty')?$('#beauty').checked:!!s.beauty,beauty_strength:$('#beautyStrength')?num($('#beautyStrength').value):Number(s.beauty_strength??.25),
     visual_filter:$('#visualFilter')?$('#visualFilter').value:(s.visual_filter||'original'),visual_filter_strength:$('#visualFilterStrength')?num($('#visualFilterStrength').value):Number(s.visual_filter_strength??.35),
+    logo_enabled:$('#logoOn')?($('#logoOn').checked&&!!(state.logo&&state.logo.path)):!!s.logo_enabled,
+    logo_path:state.logo?state.logo.path:(s.logo_path||''),logo_sha256:state.logo?state.logo.sha256:(s.logo_sha256||''),
+    logo_pos:$('#logoPos')?$('#logoPos').value:(s.logo_pos||'tr'),
+    logo_scale:$('#logoScale')?Math.max(.05,Math.min(.40,(Number($('#logoScale').value)||16)/100)):Number(s.logo_scale??.16),
+    logo_opacity:$('#logoOpacity')?Math.max(0,Math.min(1,(Number($('#logoOpacity').value)||0)/100)):Number(s.logo_opacity??.9),
+    watermark_enabled:$('#wmOn')?$('#wmOn').checked:!!s.watermark_enabled,
+    watermark_text:$('#wmText')?$('#wmText').value.trim().slice(0,40):(s.watermark_text||''),
+    watermark_pos:$('#wmPos')?$('#wmPos').value:(s.watermark_pos||'br'),
+    watermark_size:$('#wmSize')?parseInt($('#wmSize').value,10)||36:Number(s.watermark_size||36),
+    watermark_opacity:$('#wmOpacity')?Math.max(0,Math.min(1,(Number($('#wmOpacity').value)||0)/100)):Number(s.watermark_opacity??.6),
     cover:cover,intro:card(state.intro),outro:card(state.outro)}}
 function persistSettings(){if(!state.product)return;const productId=state.product.id;let snapshot;
   try{snapshot=collectSettings()}catch(e){toast(e.message,'warn');return}
@@ -144,6 +154,42 @@ function distributeSettings(){
     [...params.querySelectorAll('.voice-row')].forEach(r=>P.voice.appendChild(r));
   }
   if(adv)[...adv.querySelectorAll('.advgrid > *')].forEach(put);
+}
+
+
+function brandLabels(){
+  const ls=$('#logoScale'),lo=$('#logoOpacity'),wo=$('#wmOpacity');
+  if(ls&&$('#logoScaleVal'))$('#logoScaleVal').textContent=ls.value+'%';
+  if(lo&&$('#logoOpacityVal'))$('#logoOpacityVal').textContent=lo.value+'%';
+  if(wo&&$('#wmOpacityVal'))$('#wmOpacityVal').textContent=wo.value+'%';
+}
+function renderBrandBox(){
+  const host=$('#secSticker');if(!host)return;
+  const s=productSettings();
+  let box=$('#brandBox');
+  if(!box){box=document.createElement('div');box.id='brandBox';box.className='brand-box';host.appendChild(box)}
+  const pos=v=>[['tl','左上'],['tr','右上'],['bl','左下'],['br','右下']].map(([k,n])=>`<option value="${k}" ${v===k?'selected':''}>${n}</option>`).join('');
+  const logoName=state.logo?esc(state.logo.name||'已上传'):'未上传';
+  box.innerHTML=`<h4>自有素材</h4>
+  <label><input id="logoOn" type="checkbox" ${s.logo_enabled?'checked':''} onchange="persistSettings()"> 图片 Logo</label>
+  <div class="row brand-upload"><button type="button" class="secondary small" onclick="document.getElementById('logoFile').click()">${state.logo?'更换图片':'上传图片'}</button><span class="muted small" id="logoName">${logoName}</span><input type="file" id="logoFile" accept="image/png,image/jpeg,image/webp" style="display:none" onchange="logoUpload(event)"></div>
+  <div class="brand-grid"><label>位置 <select id="logoPos" onchange="persistSettings()">${pos(s.logo_pos)}</select></label>
+  <label>大小 <input id="logoScale" type="range" min="5" max="40" step="1" value="${Math.round(Number(s.logo_scale??.16)*100)}" oninput="brandLabels()" onchange="persistSettings()"><b id="logoScaleVal">${Math.round(Number(s.logo_scale??.16)*100)}%</b></label>
+  <label>透明度 <input id="logoOpacity" type="range" min="0" max="100" step="5" value="${Math.round(Number(s.logo_opacity??.9)*100)}" oninput="brandLabels()" onchange="persistSettings()"><b id="logoOpacityVal">${Math.round(Number(s.logo_opacity??.9)*100)}%</b></label></div>
+  <label><input id="wmOn" type="checkbox" ${s.watermark_enabled?'checked':''} onchange="persistSettings()"> 文字水印</label>
+  <input id="wmText" maxlength="40" placeholder="例如 @yourbrand" value="${esc(s.watermark_text||'')}" onchange="persistSettings()">
+  <div class="brand-grid"><label>位置 <select id="wmPos" onchange="persistSettings()">${pos(s.watermark_pos)}</select></label>
+  <label>字号 <input id="wmSize" type="number" min="18" max="96" step="2" value="${Number(s.watermark_size||36)}" onchange="persistSettings()"></label>
+  <label>透明度 <input id="wmOpacity" type="range" min="0" max="100" step="5" value="${Math.round(Number(s.watermark_opacity??.6)*100)}" oninput="brandLabels()" onchange="persistSettings()"><b id="wmOpacityVal">${Math.round(Number(s.watermark_opacity??.6)*100)}%</b></label></div>`;
+}
+async function logoUpload(ev){
+  const f=ev.target.files&&ev.target.files[0];ev.target.value='';if(!f||!state.product)return;
+  if(f.size>12*1024*1024)return toast('图片需小于 12MB','warn');
+  try{const r=await api(`/api/products/${state.product.id}/overlay-file`,{method:'POST',headers:{'Content-Type':f.type||'image/png'},body:f,timeoutMs:60000});
+    state.logo={path:r.path,sha256:r.sha256,name:f.name||r.name};
+    const on=$('#logoOn');if(on)on.checked=true;
+    renderBrandBox();persistSettings();toast('Logo 已上传');
+  }catch(e){toast(e.message,'warn')}
 }
 
 function renderMusicLibrary(){
@@ -232,7 +278,7 @@ function renderScript(){const el=$('#secScript');if(!el)return;
   if(adv)adv.innerHTML=(cutAdv>0&&cutBatch>cutAdv)?html.slice(cutAdv,cutBatch):'';
   const batchEl=$('#secBatch');
   if(batchEl)batchEl.innerHTML=cutBatch>0?html.slice(cutBatch):'';
-  distributeSettings();renderMusicLibrary();renderBatchBox();renderCopyList();renderEstimate();syncSentenceGapUI();renderRewritePreview();aiBusySet(state.aiBusy,state.aiBusyMessage)}
+  distributeSettings();renderMusicLibrary();renderBrandBox();renderBatchBox();renderCopyList();renderEstimate();syncSentenceGapUI();renderRewritePreview();aiBusySet(state.aiBusy,state.aiBusyMessage)}
 function syncSentenceGapUI(){const voice=$('#voice'),mode=$('#sentenceGapMode'),input=$('#sentenceGap');const muted=!!voice&&!voice.checked;const auto=!mode||mode.value==='auto';if(mode)mode.disabled=muted;if(input){input.disabled=muted||auto;if(auto)input.value=''}}
 function onVoiceToggle(){syncSentenceGapUI();timingChanged();persistSettings()}
 function onSentenceGapModeChange(){const mode=$('#sentenceGapMode'),input=$('#sentenceGap');if(mode&&mode.value==='manual'&&input&&!String(input.value||'').trim())input.value='0.10';if(mode&&mode.value==='auto'&&input)input.value='';syncSentenceGapUI();timingChanged();persistSettings()}
