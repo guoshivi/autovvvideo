@@ -716,7 +716,8 @@ function jobActions(j){if(!state.product)return '';
 function renderQueue(){const el=$('#secQueue');if(!el)return;
   const all=state.jobs,f=state.queueFilter||'all';
   const cnt={all:all.length,active:all.filter(x=>['queued','running','paused'].includes(x.status)).length,failed:all.filter(x=>x.status==='failed').length,done:all.filter(x=>x.status==='done').length};
-  const jobs=[...queueFilterJobs()].sort((a,b)=>(b.created_at||0)-(a.created_at||0));
+  const RANK={running:0,queued:1,paused:2,failed:3,done:4,cancelled:5,interrupted:6};
+  const jobs=[...queueFilterJobs()].sort((a,b)=>((RANK[a.status]??9)-(RANK[b.status]??9))||((b.created_at||0)-(a.created_at||0)));
   const total=jobs.length;const pages=Math.max(1,Math.ceil(total/QUEUE_PER_PAGE));
   const page=Math.min(pages,Math.max(1,state.queuePage||1));state.queuePage=page;
   const slice=jobs.slice((page-1)*QUEUE_PER_PAGE,page*QUEUE_PER_PAGE);
@@ -726,7 +727,10 @@ function renderQueue(){const el=$('#secQueue');if(!el)return;
   const status=!w.alive&&state.worker?`<div class="errline">出片线程已停止：需要重启服务（或联系技术支持），已停放的任务可先取消</div>`:disk.ok===false?`<div class="skipline">磁盘空间不足（剩 ${(Number(disk.free_bytes||0)/1073741824).toFixed(1)} GB）：已暂停接单，清理空间后会自动继续</div>`:disk.free_bytes!=null?`<div class="muted small">磁盘剩余 ${(Number(disk.free_bytes)/1073741824).toFixed(1)} GB</div>`:'';
   const tools=`<div class="row queue-tools">${queued?`<button class="secondary small" onclick="cancelAllQueued()">取消全部排队中 (${queued})</button>`:''}<label class="muted small" title="导出文件核验并持久化完成后，保留导出文件并删除任务目录中的本地成片临时文件；失败会保留文件，报告、封面和少量音频仍保留"><input type="checkbox" ${state.prefs.cleanup_after_success?'checked':''} onchange="toggleCleanup(this)"> 出片成功核验后保留导出、清理本地成片临时文件（失败保留）</label><button class="secondary small" onclick="cleanupRecords()" ${terminal?'':'disabled'}>清理已结束记录</button></div>`;
     const pid=state.product?state.product.id:'';
-  const cards=slice.map(j=>{
+  const work=slice.filter(j=>['running','queued','paused'].includes(j.status));
+  const failed=slice.filter(j=>j.status==='failed');
+  const finished=slice.filter(j=>['done','cancelled','interrupted'].includes(j.status));
+  const cards=work.map(j=>{
     const st=cn(STATUS_CN,j.status),active=['running','queued','paused'].includes(j.status),pct=Math.max(2,Math.min(100,Number(j.progress)||0));
     const thumb=j.status==='done'&&j.artifact?`<img loading="lazy" src="/api/thumbs/${j.id}?product_id=${pid}&v=${Math.floor((j.finished_at||0)*1000)}" alt="" onerror="this.closest('.qthumb').classList.add('noimg')">`:`<div class="qph"><b>${pct}%</b><span>${st}</span></div>`;
     const acts=j.status==='done'&&j.artifact?`<a class="miniact" href="/api/results/${j.id}?product_id=${pid}" target="_blank" rel="noopener">播放</a><a class="miniact" href="/api/results/${j.id}?product_id=${pid}" download="job-${j.id.slice(0,8)}.mp4">下载</a>`:jobActions(j);
@@ -736,7 +740,7 @@ function renderQueue(){const el=$('#secQueue');if(!el)return;
         <div class="qhead"><div class="qtitle">${esc(j.script_summary||'（无文案摘要）')}</div><b class="tag ${tagCls(j.status)}">${st}</b></div>
         <div class="qmeta">${j.id.slice(0,8)} · v${Number.isInteger(j.variant)?j.variant:0} · ${j.lines_count||'—'} 句 · ${dayKey(j.created_at)} ${fmtClock(j.created_at)}</div>
         ${active?`<div class="qprog"><div><i style="width:${pct}%"></i></div><span>${pct}%</span></div>`:''}
-        <div class="qline">${jobLine(j)}</div>
+        ${active?`<div class="qline">${jobLine(j)}</div>`:''}
         ${j.status==='failed'&&j.error?`<div class="errline">${esc(humanError(j))}</div>`:''}
         ${j.skipped_files&&j.skipped_files.length?`<div class="skipline">跳过 ${j.skipped_files.length} 个素材 · 下次建索引自动重试</div>`:''}
         ${j.cleanup&&j.cleanup.files>0?`<div class="qmeta">已清理 ${fmtBytes(j.cleanup.bytes)}</div>`:''}
@@ -744,7 +748,13 @@ function renderQueue(){const el=$('#secQueue');if(!el)return;
       </div>
     </article>`
   }).join('');
-  el.innerHTML=`<h3><span class="num">3</span>任务队列 <small class="muted">自动刷新</small></h3>${status}${tools}${pager}<div class="qcards">${cards||`<div class="qempty">${f==='all'?'暂无任务——创建后会在这里逐条显示进度':'当前筛选下没有任务'}</div>`}</div>`}
+  const doneRows=finished.map(j=>{const dur=j.status==='done'&&j.duration?fmtSec(j.duration):'';const acts=j.status==='done'&&j.artifact?`<a class="miniact" href="/api/results/${j.id}?product_id=${pid}" target="_blank" rel="noopener">播放</a><a class="miniact" href="/api/results/${j.id}?product_id=${pid}" download="job-${j.id.slice(0,8)}.mp4">下载</a>`:'';
+    return `<div class="qrow">${j.status==='done'&&j.artifact?`<img loading="lazy" src="/api/thumbs/${j.id}?product_id=${pid}&v=${Math.floor((j.finished_at||0)*1000)}" alt="">`:'<span class="qrow-dot"></span>'}<div class="qrow-main"><b>${esc(j.script_summary||'（无文案摘要）')}</b><span>v${Number.isInteger(j.variant)?j.variant:0} · ${j.lines_count||'—'} 句 · ${dayKey(j.created_at)} ${fmtClock(j.created_at)}</span></div>${dur?`<span class="qrow-dur">${dur}</span>`:''}${acts}</div>`}).join('');
+  const failedRows=failed.map(j=>`<div class="qrow qrow-fail"><span class="qrow-dot"></span><div class="qrow-main"><b>${esc(j.script_summary||'（无文案摘要）')}</b><span>v${Number.isInteger(j.variant)?j.variant:0} · ${dayKey(j.created_at)} ${fmtClock(j.created_at)} · ${esc(humanError(j))}</span></div></div>`).join('');
+  const failedBlock=failed.length?`<details class="qdone qfailed" ${f==='failed'?'open':''}><summary>失败 ${cnt.failed} 条 <span class="muted small">展开看原因</span></summary><div class="qdone-list">${failedRows}</div></details>`:'';
+  const doneBlock=finished.length?`<details class="qdone" ${f==='done'?'open':''}><summary>已完成 ${cnt.done} 条 <span class="muted small">点开看已完成任务</span></summary><div class="qdone-list">${doneRows}</div></details>`:'';
+  const emptyText=f==='active'?'当前没有进行中的任务':(failed.length||finished.length?'当前没有进行中的任务，失败/已完成记录在下方':'暂无任务——创建后会在这里显示进度');
+  el.innerHTML=`<h3><span class="num">3</span>任务队列 <small class="muted">自动刷新</small></h3>${status}${tools}${pager}<div class="qcards">${cards||((f==='done'||f==='failed')?'':`<div class="qempty">${emptyText}</div>`)}</div>${failedBlock}${doneBlock}`}
 
 function resultJobs(){let rows=state.jobs.filter(j=>j.status==='done'&&j.artifact&&j.lines_count!==undefined);
   const q=String(state.resultQuery||'').trim().toLowerCase();
