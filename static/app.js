@@ -130,8 +130,28 @@ if(document.addEventListener)document.addEventListener('click',e=>{
   const btn=e.target&&e.target.closest&&e.target.closest('[data-wb-tab]');
   if(btn)setWbTab(btn.dataset.wbTab);
 });
+function distributeSettings(){
+  const P={voice:$('#secVoice'),subtitle:$('#secSubtitle'),sticker:$('#secSticker'),flower:$('#secFlower'),music:$('#secMusic'),other:$('#secOther')};
+  if(!P.voice||!P.other)return;
+  Object.values(P).forEach(p=>{p.innerHTML=''});
+  const map={voice:'voice',voiceEngine:'voice',speed:'voice',sentenceGapMode:'voice',subs:'subtitle',subSize:'subtitle',subPos:'subtitle',subBorder:'subtitle',subStyle:'subtitle',hlSource:'subtitle',hlOn:'subtitle',stickerOn:'sticker',sfxOn:'sticker',flowerOn:'flower',flowerStyle:'flower',flowerDensity:'flower',bgmBtn:'music',bgmVol:'music'};
+  const keyOf=n=>{const e=n.querySelector&&n.querySelector('[id]');return e?e.id:''};
+  const put=n=>{if(n)P[map[keyOf(n)]||'other'].appendChild(n)};
+  const params=$('#secParams'),adv=$('#secAdvanced');
+  if(params){
+    [...params.querySelectorAll('.settings-row:not(.voice-row) > label')].forEach(put);
+    [...params.querySelectorAll('.voice-row')].forEach(r=>P.voice.appendChild(r));
+  }
+  if(adv)[...adv.querySelectorAll('.advgrid > *')].forEach(put);
+}
+function renderPreview(job){
+  const box=$('#wbPreview');if(!box)return;
+  if(!job){box.innerHTML='<div class="wb-preview-phone"><b>9:16</b><span>成片预览</span><small>生成后在这里播放；历史结果仍在下方</small></div><div class="wb-preview-meta" id="wbPreviewMeta">1080 × 1920 · 30fps</div>';return}
+  const q=`product_id=${state.product.id}`;
+  box.innerHTML=`<video class="wb-video" src="/api/results/${job.id}?${q}" poster="/api/thumbs/${job.id}?${q}" controls playsinline preload="metadata"></video><div class="wb-preview-meta">${fmtSec(job.duration)} · ${fmtBytes(job.bytes)} · ${fmtClock(job.finished_at)}</div>`;
+}
 function renderScript(){const el=$('#secScript');if(!el)return;
-  if(!state.product){el.innerHTML='<h3><span class="num">2</span>脚本生产</h3><p class="muted">选择商品后可用。</p>';['secParams','secAdvanced','secBatch'].forEach(id=>{const n=document.getElementById(id);if(n)n.innerHTML=''});return}
+  if(!state.product){el.innerHTML='<h3><span class="num">2</span>脚本生产</h3><p class="muted">选择商品后可用。</p>';['secParams','secAdvanced','secBatch','secVoice','secSubtitle','secSticker','secFlower','secMusic','secOther'].forEach(id=>{const n=document.getElementById(id);if(n)n.innerHTML=''});return}
   const s=productSettings();const engine=s.voice_engine||'qwen';const text=(state.draft!==''||state.draftProductId===state.product.id)?state.draft:(state.product.copy?.text||'');
   const coverName=state.cover?(state.cover.mode==='file'?(state.cover.name||String(state.cover.path||'').split(/[\\/]/).pop()):(state.cover.mode==='frame'?`第 ${state.cover.seconds} 秒`:'自动（第 1 秒）')):'';
   const introName=state.intro?(state.intro.name||String(state.intro.path||'').split(/[\\/]/).pop()):'';
@@ -184,7 +204,7 @@ function renderScript(){const el=$('#secScript');if(!el)return;
   if(adv)adv.innerHTML=(cutAdv>0&&cutBatch>cutAdv)?html.slice(cutAdv,cutBatch):'';
   const batchEl=$('#secBatch');
   if(batchEl)batchEl.innerHTML=cutBatch>0?html.slice(cutBatch):'';
-  renderBatchBox();renderCopyList();renderEstimate();syncSentenceGapUI();renderRewritePreview();aiBusySet(state.aiBusy,state.aiBusyMessage)}
+  distributeSettings();renderBatchBox();renderCopyList();renderEstimate();syncSentenceGapUI();renderRewritePreview();aiBusySet(state.aiBusy,state.aiBusyMessage)}
 function syncSentenceGapUI(){const voice=$('#voice'),mode=$('#sentenceGapMode'),input=$('#sentenceGap');const muted=!!voice&&!voice.checked;const auto=!mode||mode.value==='auto';if(mode)mode.disabled=muted;if(input){input.disabled=muted||auto;if(auto)input.value=''}}
 function onVoiceToggle(){syncSentenceGapUI();timingChanged();persistSettings()}
 function onSentenceGapModeChange(){const mode=$('#sentenceGapMode'),input=$('#sentenceGap');if(mode&&mode.value==='manual'&&input&&!String(input.value||'').trim())input.value='0.10';if(mode&&mode.value==='auto'&&input)input.value='';syncSentenceGapUI();timingChanged();persistSettings()}
@@ -478,8 +498,8 @@ function resultJobs(){return state.jobs.filter(j=>j.status==='done'&&j.artifact&
 function resultGroups(rows){const byKey={};(rows||resultJobs()).forEach(j=>{const ts=j.finished_at||j.created_at||0,dk=dayKey(ts),key=dk+'|'+(j.script_summary||'')+'|'+(j.lines_count||0);let g=byKey[key];if(!g)g=byKey[key]={key,summary:j.script_summary||'（无标题）',lines:j.lines_count||0,items:[],date:dk,finished_at:ts};g.items.push(j);g.finished_at=Math.max(g.finished_at,ts)});
   return Object.values(byKey).sort((a,b)=>(b.finished_at||0)-(a.finished_at||0)||String(b.key).localeCompare(String(a.key)))}
 function renderResults(){const el=$('#secResults');if(!el)return;
-  if(!state.product){el.innerHTML='<h3><span class="num">4</span>结果</h3><p class="muted">选择商品后显示。</p>';return}
-  const rows=resultJobs(),total=rows.length,pages=Math.max(1,Math.ceil(total/12));const requested=Number.parseInt(state.resultsPage,10);state.resultsPage=Math.min(pages,Math.max(1,Number.isFinite(requested)?requested:1));const page=state.resultsPage,slice=rows.slice((page-1)*12,page*12),groups=resultGroups(slice);
+  if(!state.product){el.innerHTML='<h3><span class="num">4</span>结果</h3><p class="muted">选择商品后显示。</p>';renderPreview(null);return}
+  const rows=resultJobs();renderPreview(rows[0]||null);const total=rows.length,pages=Math.max(1,Math.ceil(total/12));const requested=Number.parseInt(state.resultsPage,10);state.resultsPage=Math.min(pages,Math.max(1,Number.isFinite(requested)?requested:1));const page=state.resultsPage,slice=rows.slice((page-1)*12,page*12),groups=resultGroups(slice);
   const pager=`<div class="pager"><span class="muted small">共 ${total} 条成片</span><button class="secondary small" onclick="resultsGo(-1)" ${page<=1?'disabled':''}>‹ 上一页</button><span class="small pageno">第 ${page}/${pages} 页</span><button class="secondary small" onclick="resultsGo(1)" ${page>=pages?'disabled':''}>下一页 ›</button></div>`;
   el.innerHTML=`<h3><span class="num">4</span>结果 <small class="muted">完成后可播放 / 下载</small></h3>${total?pager:`<p class="muted">还没有成片——出片完成后会在这里以卡片显示。</p>`}${groups.map(d=>`<div class="daygroup"><div class="resgroup"><span class="chip">${esc(d.date)}</span>${resCard(d)}</div></div>`).join('')}${total?pager:''}`}
 function resultsGo(d){const pages=Math.max(1,Math.ceil(resultJobs().length/12));const current=Number.parseInt(state.resultsPage,10);state.resultsPage=Math.min(pages,Math.max(1,(Number.isFinite(current)?current:1)+d));renderResults()}
