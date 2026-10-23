@@ -29,6 +29,6 @@
 
 ## 使用方式
 
-1. 先读 `gap.md` 看总量：69 行中 have 17、partial 17、missing 32、n/a 3。
+1. 先读 `gap.md` 看总量：69 行中 have 31、partial 14、missing 21、n/a 3（2026-10-23 晚）。
 2. 开发时以 `features.csv` 的行号为准，做完一行把 `ours` 改为 `have`。
 3. 任何 UI 复刻只借结构，不复制即创的 Logo、文案、音色名、音乐与模板素材。
